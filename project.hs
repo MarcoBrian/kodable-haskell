@@ -25,7 +25,7 @@ findPlayerPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemI
 
 type Item = Char
 type Board = [[Item]]
-
+type Direction = String
 
 boardToStr :: Board -> String
 boardToStr board = unlines (map (intersperse ' ') board)
@@ -108,7 +108,7 @@ directions = ["Left","Right","Up","Down"]
 
 
 
-getPlayDirection :: [String] -> IO [String]
+getPlayDirection :: [String] -> IO [Direction]
 getPlayDirection xs = do command <- getLine
                          let stripped_command = stripWhiteSpaces command -- take away trailing whitespaces
                          if (not $ null command) && (not $ null $ elemIndices stripped_command directions) 
@@ -116,7 +116,7 @@ getPlayDirection xs = do command <- getLine
                          else do return xs
 
 -- invalid input will cause the play IO to return 
-play :: [String] -> IO [String]
+play :: [String] -> IO [Direction]
 play xs = do if null xs
                 then do putStr "First   Direction : "
                         getPlayDirection xs
@@ -148,12 +148,16 @@ loadFile filepath = do
     return new_map
 
 
-sample_board :: Board
 
 
 -- TODO will delete
-test = do xs <- play []
-          putStrLn $ show xs
+test = do xs <- loadFile "map1-2.txt"
+          let new_pos = moveFully xs "Right"
+              new_pos2 = moveFully new_pos "Down"
+              new_pos3 = moveFully new_pos2 "Right"
+          putStrLn (boardToStr $ getBoard new_pos3)
+
+
 
 
 getItemFromPos :: Board -> Int -> Int -> Item 
@@ -163,32 +167,89 @@ getItemFromPos board i j = (board !! i) !! j
 
 
 
--- testDirection :: GameMap -> String -> Bool  
--- testDirection game_map direction 
---         | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) /= grass)
---         | direction == "Right" = (j<width) && (getItemFromPos board (j+1) /= grass)
---         | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j /= grass) 
---         | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j /= grass)
---         where (i,j) = getPlayerPos game_map 
---               board = getBoard game_map
---               width = getWidth game_map 
---               height = getHeight game_map
+testDirection :: GameMap -> Direction -> Bool  
+testDirection game_map direction 
+        | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) /= grass)
+        | direction == "Right" = (j<width) && (getItemFromPos board i (j+1) /= grass)
+        | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j /= grass) 
+        | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j /= grass)
+        where (i,j) = getPlayerPos game_map 
+              board = getBoard game_map
+              width = getWidth game_map 
+              height = getHeight game_map
 
 
--- moveOneStep :: GameMap -> String -> GameMap  
--- moveOneStep game_map direction 
---         | (direction == "Left") && tested = GameMap { get}
---         | (direction == "Right") && tested = 
---         | (direction == "Up") && tested =
---         | (direction == "Down") && tested = 
---         where (i,j) = getPlayerPos game_map 
---               board = getBoard game_map
---               tested = testDirection game_map direction
+updateBoard :: GameMap -> Board -> Int -> Int -> GameMap 
+updateBoard game_map board new_i new_j = GameMap {getBoard = board, 
+                                                  getHeight= height,
+                                                  getWidth = width,               
+                                                  getPlayerPos = (new_i,new_j),
+                                                  playerWon = False
+                                                 }
+    where height = getHeight game_map
+          width = getWidth game_map
+
+
+moveFully :: GameMap -> Direction -> GameMap
+moveFully game_map direction =
+    if testDirection game_map direction
+        then moveFully (moveOneStep game_map direction) direction
+    else game_map
+
+moveOneStep :: GameMap -> Direction -> GameMap  
+moveOneStep game_map direction 
+        | (direction == "Left") && tested = updateBoard game_map (moveLeft board i j) i (j-1)
+        | (direction == "Right") && tested = updateBoard game_map (moveRight board i j) i (j+1)
+        | (direction == "Up") && tested = updateBoard game_map (moveUp board i j) (i-1) j
+        | (direction == "Down") && tested = updateBoard game_map (moveDown board i j) (i+1) j
+        | otherwise = game_map
+        where (i,j) = getPlayerPos game_map 
+              height = getHeight game_map
+              width = getWidth game_map
+              board = getBoard game_map
+              tested = testDirection game_map direction
 
 
 
-              
+moveUp :: Board -> Int -> Int -> Board
+moveUp board i j = 
+    let move1 = edit2DArray (i-1) j ball board
+        move2 = edit2DArray i j path move1
+    in move2
 
+moveDown :: Board -> Int -> Int -> Board
+moveDown board i j = 
+    let move1 = edit2DArray (i+1) j ball board
+        move2 = edit2DArray i j path move1
+    in move2
+
+moveRight :: Board -> Int -> Int -> Board
+moveRight board i j = 
+    let move1 = edit2DArray i (j+1) ball board
+        move2 = edit2DArray i j path move1
+    in move2
+
+moveLeft :: Board -> Int -> Int -> Board
+moveLeft board i j = 
+    let move1 = edit2DArray i (j-1) ball board
+        move2 = edit2DArray i j path move1
+    in move2
+
+editRow :: Int -> a -> [a] -> [a]
+editRow _ _ [] = []
+editRow pos elem xs = if pos >= 0 && pos < length xs
+                        then ((take pos xs) ++ [elem] ++ (drop (pos+1) xs))
+                      else xs
+
+edit2DArray :: Int -> Int -> a -> [[a]] -> [[a]]
+edit2DArray row_idx col_idx elem matrix = 
+    if row_idx >= 0 && row_idx < length matrix
+      then let old_row = matrix !! row_idx
+               new_row = editRow col_idx elem old_row
+           in editRow row_idx new_row matrix 
+    else []
+                      
+sample_board :: Board
 sample_board = ["*****-------------------*****",
                 "*****b-----------------b*****",
                 "*****-*****************-*****",
