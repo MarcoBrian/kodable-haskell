@@ -1,7 +1,45 @@
 
 import System.IO  
 import Prelude
+import Parser
+
+import Data.Char 
 import Data.List
+
+
+-- Command Parsers 
+colorParser :: Parser Char
+colorParser = char 'p' +++ char 'o' +++ char 'y'  
+
+directionParser :: Parser String 
+directionParser = string "Right" +++ string "Left" +++ string "Up" +++ string "Down" 
+
+numberParser :: Parser Char 
+numberParser = char '1' +++ char '2' +++ char '3' +++ char '4' +++ char '5' 
+
+loopParser :: Parser (Int, String, String)
+loopParser = do string "Loop"
+                char '{'
+                number <- numberParser 
+                char '}'  
+                char '{'
+                direction1 <- directionParser
+                char ','
+                direction2 <- directionParser
+                char '}'
+                return (digitToInt number,direction1,direction2)
+
+conditionalParser :: Parser (Char,String)
+conditionalParser = do string "Cond"
+                       char '{'
+                       color <- colorParser
+                       char '}' 
+                       char '{'
+                       direction <- directionParser
+                       char '}'
+                       return (color,direction)
+
+
 
 whitespaces :: String
 whitespaces = " \n\r\t\f\v"
@@ -58,6 +96,10 @@ bonus = 'b'
 -- ‘t’ represents the target point.
 target :: Item
 target = 't'
+
+
+conditionals :: [Item] 
+conditionals = [orange,yellow,pink]
 
 data GameMap = GameMap 
                { getBoard :: Board ,
@@ -159,7 +201,13 @@ test = do xs <- loadFile "map1-2.txt"
           let new_pos = moveFully xs "Right"
               new_pos2 = moveFully new_pos "Down"
               new_pos3 = moveFully new_pos2 "Right"
-          putStrLn (boardToStr $ getBoard new_pos3)
+              new_pos4 = moveFully new_pos3 "Up"
+              new_pos5 = moveFully new_pos4 "Right"
+              new_pos6 = moveFully new_pos5 "Down"
+              new_pos7 = moveFully new_pos6 "Right"
+              new_pos8 = moveFully new_pos7 "Up"
+              new_pos9 = moveFully new_pos8 "Up"
+          putStrLn (boardToStr $ getBoard new_pos9)
 
 
 
@@ -170,13 +218,26 @@ getItemFromPos board i j = (board !! i) !! j
 
 
 
-
+-- check if item is traversable (not grass)
 testDirection :: GameMap -> Direction -> Bool  
 testDirection game_map direction 
         | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) /= grass)
         | direction == "Right" = (j<width) && (getItemFromPos board i (j+1) /= grass)
         | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j /= grass) 
         | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j /= grass)
+        where (i,j) = getPlayerPos game_map 
+              board = getBoard game_map
+              width = getWidth game_map 
+              height = getHeight game_map
+
+
+-- check if item is conditional 
+testDirectionConditional :: GameMap -> Direction -> Bool  
+testDirectionConditional game_map direction 
+        | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) `elem` conditionals )
+        | direction == "Right" = (j<width) && (getItemFromPos board i (j+1)`elem` conditionals)
+        | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j `elem` conditionals ) 
+        | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j `elem` conditionals )
         where (i,j) = getPlayerPos game_map 
               board = getBoard game_map
               width = getWidth game_map 
@@ -193,10 +254,16 @@ updateBoard game_map board new_i new_j = GameMap {getBoard = board,
     where height = getHeight game_map
           width = getWidth game_map
 
-
+-- if game across a condition then we do one more 
+-- else if game come across bonus then we add the bonus to the gameMap (increment bonus point) 
+-- else if game come across path then recursion 
+-- else just return the game
+-- dont stop when meeting conditional unless the direction is conditional. 
 moveFully :: GameMap -> Direction -> GameMap
 moveFully game_map direction =
-    if testDirection game_map direction
+    if testDirectionConditional game_map direction
+        then moveOneStep game_map direction
+    else if testDirection game_map direction
         then moveFully (moveOneStep game_map direction) direction
     else game_map
 
@@ -360,21 +427,3 @@ isBoardSolvable board =
         start_pos_direction = (i,j, 'A')  
     in  bfsTraverse [start_pos_direction] end_pos [] board 
 
-
--- -- Bread First Search Approach
--- bfsTraverse :: [(Int,Int)] -> (Int,Int) -> [(Int,Int)] -> Board -> Bool
--- bfsTraverse [] _ _ _ = False
--- bfsTraverse ((i, j):xs) end visited board  
---     | ((i,j) /= end) = bfsTraverse new_queue end updated_visited board
---     | otherwise = True 
---    where neighbors = [ (i,j-1), (i,j+1), (i-1,j), (i+1,j) ] -- LEFT, RIGHT , UP, DOWN 
---          traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
---          updated_visited = visited ++ [(i,j)]
---          new_queue = xs ++ traversable_positions
-
-
--- isBoardSolvable :: Board -> Bool 
--- isBoardSolvable board =
---     let start_pos = findPlayerPos board 
---         end_pos = findTargetPos board 
---     in  bfsTraverse [start_pos] end_pos [] board 
