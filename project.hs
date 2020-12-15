@@ -23,6 +23,10 @@ isRectangle contents = allEqual content_lengths
 findPlayerPos :: Board -> (Int,Int)
 findPlayerPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices ball row ]
 
+
+findTargetPos :: Board -> (Int,Int)
+findTargetPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices target row ]
+
 type Item = Char
 type Board = [[Item]]
 type Direction = String
@@ -263,3 +267,114 @@ sample_board = ["*****-------------------*****",
                 "*****--------***--------*****",
                 "*****************************",
                 "*****************************"]
+
+sample_board2 :: Board
+sample_board2= ["*****-------------------*****",
+                "*****b-----------------b*****",
+                "*****-*****************-*****",
+                "*****-**----*****----**-*****",
+                "*****-**-yy-*****-yy-**-*****",
+                "*****-**----*****----**-*****",
+                "*****-******--*--******p----*",
+                "*****-******-***-******-***-*",
+                "@-----******-***-******-----t",
+                "*****-******-***-******-*****",
+                "*****-------****--------*****",
+                "*****************************",
+                "*****************************"]
+
+
+sample_board3 :: Board
+sample_board3 =["*****----------*--------*****",
+                "*****b-----------------b*****",
+                "*****-*****************-*****",
+                "*****-**----*****----**-*****",
+                "*****-**-yy-*****-yy-**-*****",
+                "*****-**----*****----**-*****",
+                "*****-******--*--******p----*",
+                "*****-******-***-******-***-*",
+                "@-----******-***-*******----t",
+                "*****-******-***-******-*****",
+                "*****-------------------*****",
+                "*****************************",
+                "*****************************"]
+
+validPosition :: (Int,Int) -> Board -> Bool 
+validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
+    where height = length board
+          width = length (board !! 0)
+
+
+
+-- Check if board is solvable
+
+traversablePosition :: (Int,Int,Char) -> [(Int,Int)] -> Board -> Bool
+traversablePosition (i,j,_) visited board = isValidPos && (itemAtPos /= grass) && (not isVisited)
+    where isValidPos = validPosition (i,j) board
+          itemAtPos = getItemFromPos board i j 
+          isVisited = (i,j) `elem` visited
+
+isGrassPosOrOutOfRange :: (Int, Int, Char) -> Board -> Bool
+isGrassPosOrOutOfRange (i,j,_) board = not isValidPos || hasGrass 
+    where isValidPos = validPosition (i,j) board
+          itemAtPos = getItemFromPos board i j 
+          hasGrass = itemAtPos == grass
+
+isCondPos :: (Int, Int, Char) -> Board -> Bool
+isCondPos (i,j,_) board = isValidPos && hasCond 
+    where isValidPos = validPosition (i,j) board
+          itemAtPos = getItemFromPos board i j 
+          hasCond = itemAtPos `elem` [yellow,orange,pink]
+
+
+getNeighbors :: (Int,Int,Char) -> Board -> [(Int,Int,Char)]
+getNeighbors pos board -- 
+    | direction == 'L' = if (isGrassPosOrOutOfRange left board || isCondPos pos board) then all else [left]
+    | direction == 'R' = if (isGrassPosOrOutOfRange right board || isCondPos pos board) then all else [right]
+    | direction == 'U' = if (isGrassPosOrOutOfRange up board || isCondPos pos board) then all else [up]
+    | direction == 'D' = if (isGrassPosOrOutOfRange down board || isCondPos pos board) then all else [down]
+    | direction == 'A' = all 
+    where (i,j,direction) = pos 
+          left = (i, j-1,'L')
+          right = (i, j+1,'R') 
+          up = (i-1, j,'U')
+          down = (i+1, j,'D')
+          all = [left, right ,up,down]
+
+-- Bread First Search Approach
+bfsTraverse :: [(Int,Int,Char)] -> (Int,Int) -> [(Int,Int)] -> Board -> Bool
+bfsTraverse [] _ _ _ = False
+bfsTraverse ((i, j, direction):xs) end visited board  
+    | ((i,j) /= end) = bfsTraverse new_queue end updated_visited board
+    | otherwise = True 
+   where neighbors = getNeighbors (i,j,direction) board -- LEFT, RIGHT , UP, DOWN 
+         traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
+         updated_visited = visited ++ [(i,j)]
+         new_queue = xs ++ traversable_positions
+
+
+isBoardSolvable :: Board -> Bool 
+isBoardSolvable board =
+    let (i,j) = findPlayerPos board 
+        end_pos = findTargetPos board 
+        start_pos_direction = (i,j, 'A')  
+    in  bfsTraverse [start_pos_direction] end_pos [] board 
+
+
+-- -- Bread First Search Approach
+-- bfsTraverse :: [(Int,Int)] -> (Int,Int) -> [(Int,Int)] -> Board -> Bool
+-- bfsTraverse [] _ _ _ = False
+-- bfsTraverse ((i, j):xs) end visited board  
+--     | ((i,j) /= end) = bfsTraverse new_queue end updated_visited board
+--     | otherwise = True 
+--    where neighbors = [ (i,j-1), (i,j+1), (i-1,j), (i+1,j) ] -- LEFT, RIGHT , UP, DOWN 
+--          traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
+--          updated_visited = visited ++ [(i,j)]
+--          new_queue = xs ++ traversable_positions
+
+
+-- isBoardSolvable :: Board -> Bool 
+-- isBoardSolvable board =
+--     let start_pos = findPlayerPos board 
+--         end_pos = findTargetPos board 
+--     in  bfsTraverse [start_pos] end_pos [] board 
