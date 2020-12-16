@@ -7,7 +7,7 @@ import Data.Char
 import Data.List
 
 
--- Command Parsers 
+{-- Section: Command Parsers--}
 colorParser :: Parser Char
 colorParser = char 'p' +++ char 'o' +++ char 'y'  
 
@@ -61,9 +61,17 @@ isRectangle contents = allEqual content_lengths
 findPlayerPos :: Board -> (Int,Int)
 findPlayerPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices ball row ]
 
+findStarsPos :: Board -> [(Int,Int)]
+findStarsPos board = [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices bonus row ]
 
 findTargetPos :: Board -> (Int,Int)
 findTargetPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices target row ]
+
+findConditionalsPos :: Board -> [(Int,Int,Item)]
+findConditionalsPos board = [ (i,j,orange) | (row, i) <- zip board [0..] ,  j <- elemIndices orange row ] ++
+                     [ (i,j,pink) | (row, i) <- zip board [0..] ,  j <- elemIndices pink row ] ++
+                     [ (i,j,yellow) | (row, i) <- zip board [0..] ,  j <- elemIndices yellow row ] 
+
 
 type Item = Char
 type Board = [[Item]]
@@ -207,7 +215,25 @@ test = do xs <- loadFile "map1-2.txt"
               new_pos7 = moveFully new_pos6 "Right"
               new_pos8 = moveFully new_pos7 "Up"
               new_pos9 = moveFully new_pos8 "Up"
-          putStrLn (boardToStr $ getBoard new_pos9)
+              new_pos10 = moveFully new_pos9 "Left"
+              a = moveFully new_pos10 "Right"
+              b = moveFully a "Left"
+              c = moveFully b "Right"
+              e = moveFully c "Left"
+              f = moveFully e "Right"
+              g = moveFully f "Left"
+              h = moveFully g "Right"
+              i = moveFully h "Left"
+              j = moveFully i  "Right"
+              k  = moveFully j "Left"
+              l  = moveFully k "Right"
+              m = moveFully l "Left"
+              n = moveFully m "Right"
+              o = moveFully n "Left"
+
+
+          putStrLn (boardToStr $ getBoard o)
+          putStrLn (show $ getPlayerPos o)
 
 
 
@@ -215,6 +241,9 @@ test = do xs <- loadFile "map1-2.txt"
 getItemFromPos :: Board -> Int -> Int -> Item 
 getItemFromPos board i j = (board !! i) !! j
 
+
+getItemFromPosTuple :: Board -> (Int,  Int) -> Item 
+getItemFromPosTuple board (i,j) = if validPosition (i,j) board then (board !! i) !! j else 'X' -- X means invalid (out of bounds)
 
 
 
@@ -306,6 +335,73 @@ moveLeft board i j =
         move2 = edit2DArray i j path move1
     in move2
 
+
+itemIsConditional :: Item -> Bool 
+itemIsConditional item = item `elem` conditionals 
+
+itemIsGrass :: Item -> Bool 
+itemIsGrass item = item == grass 
+
+move :: Board -> (Int, Int) -> Direction -> Int -> (Int,Int,Char, Int)
+move board (i,j) direction bonusCount
+    | direction == "Left" && nextLeftValid && (not (itemIsGrass next_left)) = move board left direction bonusC
+    | direction == "Right" && nextRightValid && (not (itemIsGrass next_right)) = move board right direction bonusC
+    | direction == "Up" && nextUpValid && (not (itemIsGrass next_up) ) =  move board up direction bonusC
+    | direction == "Down" && nextDownValid && (not (itemIsGrass next_down)) =  move board down direction bonusC
+    | otherwise = (i,j,current_item,bonusCount)
+    where current_item = getItemFromPosTuple board (i,j)
+          left = (i,j-1)
+          right = (i,j+1)
+          up = (i-1,j)
+          down = (i+1,j) 
+          nextLeftValid = validPosition left board
+          nextRightValid = validPosition right board 
+          nextUpValid = validPosition up board 
+          nextDownValid = validPosition down board 
+          next_left = getItemFromPosTuple board (i,j-1)
+          next_right = getItemFromPosTuple board (i,j+1)
+          next_up = getItemFromPosTuple board (i-1,j)
+          next_down = getItemFromPosTuple board (i+1,j)
+          bonusC = (if current_item == bonus then bonusCount + 1 else bonusCount)
+
+
+
+test2 :: IO () 
+test2 = do putStr (boardToStr sample_board)
+           let (i,j) = findPlayerPos sample_board 
+               (i_new,j_new,che,bonus) = move sample_board (i,j) "Right" 0
+               (q,w,e,r) = move sample_board (i_new,j_new) "Up" bonus
+           putStrLn (show (q,w,e,r))
+           return ()  
+
+-- move :: Board -> Int -> Int -> Direction -> Board
+-- move board i j direction = 
+--     | direction == "Left" = moveLeft
+--     | direction == "Right" = moveRight
+--     | direction == "Up" = moveUp 
+--     | direction == "Down" = moveDown 
+
+-- isValidMove :: Board -> Int -> Int -> Direction -> Bool
+-- isValidMove board i j direction = 
+--     | direction == "Left" = validPosition (i,j-1) board
+--     | direction == "Right" = validPosition (i,j+1) board
+--     | direction == "Up" = validPosition (i-1,j) board 
+--     | direction == "Down" = validPosition (i+1,j) board
+
+
+-- moveStepWise :: Board -> Int -> Int -> Direction -> Board 
+-- moveStepWise board i j direction
+--     | direction == "Left" && not (isGrassPosOrOutOfRange (i,j-1,'n') board) = moveLeft board i j 
+--     | direction == "Right" && not (isGrassPosOrOutOfRange (i,j+1,'n') board) = moveRight board i j 
+--     | direction == "Up" && not (isGrassPosOrOutOfRange (i-1,j,'n') board) = moveUp board i j 
+--     | direction == "Down" && not (isGrassPosOrOutOfRange (i+1,j,'n') board) = moveDown board i j
+
+-- moveThrough :: Board -> Int -> Int -> Direction -> Board
+-- moveThrough board i j direction
+--     if isValidMove i j direction
+--         then moveThrough move board i j direction
+    
+
 editRow :: Int -> a -> [a] -> [a]
 editRow _ _ [] = []
 editRow pos elem xs = if pos >= 0 && pos < length xs
@@ -366,6 +462,22 @@ sample_board3 =["*****----------*--------*****",
                 "*****************************",
                 "*****************************"]
 
+map2_2 = ["*****-------------------*****",
+          "*****------------------b*****",
+          "*****-*****************-*****",
+          "*****-**----*****----********",
+          "*****-**----*****----**-*****",
+          "*****-**----*****----**-*****",
+          "*****-******--b--******-*****",
+          "*****-******-***-******-*****",
+          "@-----******-***-******p----t",
+          "*****-******-***-******-*****",
+          "*****---b----***--------*****",
+          "*****************************",
+          "*****************************"]
+
+
+
 validPosition :: (Int,Int) -> Board -> Bool 
 validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
     where height = length board
@@ -373,8 +485,7 @@ validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
 
 
 
--- Check if board is solvable
-
+{-- Section: Check board solvability --}
 traversablePosition :: (Int,Int,Char) -> [(Int,Int)] -> Board -> Bool
 traversablePosition (i,j,_) visited board = isValidPos && (itemAtPos /= grass) && (not isVisited)
     where isValidPos = validPosition (i,j) board
@@ -420,10 +531,52 @@ bfsTraverse ((i, j, direction):xs) end visited board
          new_queue = xs ++ traversable_positions
 
 
+bfsTraversePath :: [(Int,Int,Char)] -> (Int,Int) -> [(Int,Int)] -> [((Int,Int,Char),(Int,Int,Char))]-> Board -> [(Int,Int,Char)]
+bfsTraversePath ((i, j, direction):xs) end visited history board  
+    | ((i,j) /= end) = bfsTraversePath new_queue end updated_visited updated_history  board
+    | otherwise = pathConstruction (i,j,direction) history []
+   where neighbors = getNeighbors (i,j,direction) board 
+         traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
+         updated_visited = visited ++ [(i,j)]
+         new_queue = xs ++ traversable_positions
+         updated_history = history ++ [ ((a,b,dir),(i,j,direction)) | (a,b,dir) <- traversable_positions] 
+
+
+pathConstruction :: (Int,Int,Char) -> [((Int,Int,Char),(Int,Int,Char))] -> [(Int,Int,Char)] -> [(Int,Int,Char)]
+pathConstruction (i,j,direction) history route
+    | (length points) > 0 = (pathConstruction (head points) history updated_route )
+    | otherwise = updated_route
+    where points = [(x,y,dir2) | ((a,b,dir1),(x,y,dir2)) <- history, (a,b) == (i,j)]
+          updated_route = route ++ [(i,j,direction)] 
+
+
+pathToEnd :: Board -> [(Int,Int,Char)]
+pathToEnd board = 
+    let (i,j) = findPlayerPos board 
+        bonusPositions = findStarsPos board
+        end_pos = findTargetPos board 
+        start_pos_direction = (i,j, 'A')
+    in  reverse (bfsTraversePath [start_pos_direction] end_pos [] [] board)
+
 isBoardSolvable :: Board -> Bool 
 isBoardSolvable board =
     let (i,j) = findPlayerPos board 
         end_pos = findTargetPos board 
         start_pos_direction = (i,j, 'A')  
-    in  bfsTraverse [start_pos_direction] end_pos [] board 
+    in  bfsTraverse [start_pos_direction] end_pos [] board
 
+
+-- directionTraversable :: Direction -> GameMap -> Bool 
+-- directionTraversable direction game_map = not (initial_point == final_point)
+--     where initial_point = getPlayerPos game_map 
+--           final_point = getPlayerPos moveFully (game_map direction)
+
+-- shortestPathToPoint :: GameMap -> (Int,Int) -> [(Int,Int)] -> [Direction]
+-- shortestPathToPoint game_map point visited = 
+--     where neighbors = directions
+--           (i,j) = getPlayerPos game_map
+--           traverse_directions = filter (\dir -> directionTraversable dir game_map) neighbors 
+--           update_visited = visited ++ [(i,j)]
+--           new_queue = map (\dir -> getPlayerPos (moveFully game_map dir) ) neighbors
+
+-- -- pathConstruction 
