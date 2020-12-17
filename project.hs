@@ -61,8 +61,8 @@ isRectangle contents = allEqual content_lengths
 findPlayerPos :: Board -> (Int,Int)
 findPlayerPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices ball row ]
 
-findStarsPos :: Board -> [(Int,Int)]
-findStarsPos board = [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices bonus row ]
+findBonusPos :: Board -> [(Int,Int)]
+findBonusPos board = [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices bonus row ]
 
 findTargetPos :: Board -> (Int,Int)
 findTargetPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices target row ]
@@ -76,6 +76,7 @@ findConditionalsPos board = [ (i,j,orange) | (row, i) <- zip board [0..] ,  j <-
 type Item = Char
 type Board = [[Item]]
 type Direction = String
+type Point = (Int,Int,Char)
 
 boardToStr :: Board -> String
 boardToStr board = unlines (map (intersperse ' ') board)
@@ -518,6 +519,7 @@ getNeighbors pos board --
           up = (i-1, j,'U')
           down = (i+1, j,'D')
           all = [left, right ,up,down]
+          
 
 -- Bread First Search Approach
 bfsTraverse :: [(Int,Int,Char)] -> (Int,Int) -> [(Int,Int)] -> Board -> Bool
@@ -531,31 +533,35 @@ bfsTraverse ((i, j, direction):xs) end visited board
          new_queue = xs ++ traversable_positions
 
 
-bfsTraversePath :: [(Int,Int,Char)] -> (Int,Int) -> [(Int,Int)] -> [((Int,Int,Char),(Int,Int,Char))]-> Board -> [(Int,Int,Char)]
-bfsTraversePath ((i, j, direction):xs) end visited history board  
+bfsTraversePath :: [(Int,Int,Char,Char)] -> (Int,Int) -> [(Int,Int)] -> [((Int,Int,Char,Char),(Int,Int,Char,Char))]-> Board -> [(Int,Int,Char,Char)]
+bfsTraversePath ((i, j, direction,item):xs) end visited history board  
     | ((i,j) /= end) = bfsTraversePath new_queue end updated_visited updated_history  board
-    | otherwise = pathConstruction (i,j,direction) history []
+    | otherwise = pathConstruction (i,j,direction,item) history []
    where neighbors = getNeighbors (i,j,direction) board 
          traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
          updated_visited = visited ++ [(i,j)]
-         new_queue = xs ++ traversable_positions
-         updated_history = history ++ [ ((a,b,dir),(i,j,direction)) | (a,b,dir) <- traversable_positions] 
+         traversable_positions_item = [ (ii,jj,dd, getItemFromPosTuple board (ii,jj) ) | (ii,jj,dd)<- traversable_positions]
+         new_queue = xs ++ traversable_positions_item
+         updated_history = history ++ [ ((a,b,dir,it2),(i,j,direction,item)) | (a,b,dir,it2) <- traversable_positions_item] 
 
 
-pathConstruction :: (Int,Int,Char) -> [((Int,Int,Char),(Int,Int,Char))] -> [(Int,Int,Char)] -> [(Int,Int,Char)]
-pathConstruction (i,j,direction) history route
+
+
+
+pathConstruction :: (Int,Int,Char,Char) -> [((Int,Int,Char,Char),(Int,Int,Char,Char))] -> [(Int,Int,Char,Char)] -> [(Int,Int,Char,Char)]
+pathConstruction (i,j,direction,item) history route
     | (length points) > 0 = (pathConstruction (head points) history updated_route )
     | otherwise = updated_route
-    where points = [(x,y,dir2) | ((a,b,dir1),(x,y,dir2)) <- history, (a,b) == (i,j)]
-          updated_route = route ++ [(i,j,direction)] 
+    where points = [(x,y,dir2,item2) | ((a,b,_,_) , (x,y,dir2, item2)) <- history, (a,b) == (i,j)]
+          updated_route = route ++ [(i,j,direction,item)] 
 
 
-pathToEnd :: Board -> [(Int,Int,Char)]
+pathToEnd :: Board -> [(Int,Int,Char,Char)]
 pathToEnd board = 
     let (i,j) = findPlayerPos board 
-        bonusPositions = findStarsPos board
+        bonusPositions = findBonusPos board
         end_pos = findTargetPos board 
-        start_pos_direction = (i,j, 'A')
+        start_pos_direction = (i,j, 'A', getItemFromPosTuple board (i,j) )
     in  reverse (bfsTraversePath [start_pos_direction] end_pos [] [] board)
 
 isBoardSolvable :: Board -> Bool 
@@ -566,17 +572,76 @@ isBoardSolvable board =
     in  bfsTraverse [start_pos_direction] end_pos [] board
 
 
--- directionTraversable :: Direction -> GameMap -> Bool 
--- directionTraversable direction game_map = not (initial_point == final_point)
---     where initial_point = getPlayerPos game_map 
---           final_point = getPlayerPos moveFully (game_map direction)
 
--- shortestPathToPoint :: GameMap -> (Int,Int) -> [(Int,Int)] -> [Direction]
--- shortestPathToPoint game_map point visited = 
---     where neighbors = directions
---           (i,j) = getPlayerPos game_map
---           traverse_directions = filter (\dir -> directionTraversable dir game_map) neighbors 
---           update_visited = visited ++ [(i,j)]
---           new_queue = map (\dir -> getPlayerPos (moveFully game_map dir) ) neighbors
 
--- -- pathConstruction 
+
+-- Search all possible paths to complete game
+searchAllPath :: Board -> (Int,Int,Char) -> [(Int,Int,Char)] -> [(Int,Int)] -> [[(Int,Int,Char)]] 
+searchAllPath board (i,j,dir) paths visited 
+    | ((i,j) `elem` visited) = [] 
+    | (getItemFromPosTuple board (i,j) == target) =  [new_path]
+    | (getItemFromPosTuple board (i,j) == bonus) = concat [ searchAllPath new_board next new_path [] | next <- traversable_positions ]
+    | otherwise = concat [ searchAllPath board next new_path updated_visited | next <- traversable_positions ]
+    where neighbors = getNeighbors (i,j,dir) board
+          new_board = edit2DArray i j '-' board
+          traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
+          new_path = paths ++ [(i,j,dir)]
+          updated_visited = visited ++ [(i,j)]
+
+
+withBonus :: [(Int,Int)] -> [[(Int,Int,Char)]] ->  [[(Int,Int,Char)]]
+withBonus bonuses [] = [] 
+withBonus bonuses (p:paths) = 
+    let path_coord = [ (i,j) | (i,j,dir) <- p]
+        hasAllBonus = (intersect bonuses path_coord == bonuses)
+        rest_path = withBonus bonuses paths
+    in if hasAllBonus then [p] ++ rest_path else [] ++ rest_path
+
+pathWithThreeBonus :: Board -> [[(Int,Int,Char)]]
+pathWithThreeBonus board = 
+    let bonuses = findBonusPos board 
+        (i,j) = findPlayerPos board
+        all_paths = searchAllPath board (i,j,'A') [] []
+    in withBonus bonuses all_paths
+
+
+squashMoves :: [Char] -> [Char]
+squashMoves [] = []
+squashMoves [x] = [x]
+squashMoves (x1:x2:xs)
+    | x1==x2 = squashMoves (x2:xs)
+    | otherwise = x1:squashMoves (x2:xs)
+
+
+testSearchAllPath :: Board -> [String]
+testSearchAllPath board =
+    let (i,j) = findPlayerPos board 
+        bonusPositions = findBonusPos board
+        end_pos = findTargetPos board 
+        start_pos_direction = (i,j, 'A')
+        paths = searchAllPath board start_pos_direction [] []
+        paths_string = [ [ dir | (x,y,dir) <- path] | path <-paths]
+        result = map squashMoves paths_string
+    in  result
+
+
+
+path_construct = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'R','-'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
+path_construct2 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','-'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
+path_construct3 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','p'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
+
+
+
+
+
+squashDirections :: [(Char,Char)] -> [(Char,Char)]
+squashDirections [] = []
+squashDirections [x] = [x]
+squashDirections (x1:x2:xs)
+    | x1==x2 = squashDirections (x2:xs)
+    | otherwise = x1:squashDirections (x2:xs)
+
+
+
+reformatPath :: [(Integer,Integer,Char,Char)] -> [(Char,Char)]
+reformatPath paths =  squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]
