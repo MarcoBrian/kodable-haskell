@@ -449,29 +449,29 @@ sample_board2= ["*****-------------------*****",
 
 
 sample_board3 :: Board
-sample_board3 =["*****----------*--------*****",
+sample_board3= ["*****-------------------*****",
                 "*****b-----------------b*****",
                 "*****-*****************-*****",
                 "*****-**----*****----**-*****",
                 "*****-**-yy-*****-yy-**-*****",
                 "*****-**----*****----**-*****",
-                "*****-******--*--******p----*",
-                "*****-******-***-******-***-*",
-                "@-----******-***-*******----t",
+                "*****-******--b--******-*****",
                 "*****-******-***-******-*****",
-                "*****-------------------*****",
+                "@-----******-***-******p----t",
+                "*****-******-***-******-*****",
+                "*****--------***----*---*****",
                 "*****************************",
                 "*****************************"]
 
 map2_2 = ["*****-------------------*****",
           "*****------------------b*****",
           "*****-*****************-*****",
-          "*****-**----*****----********",
+          "*****-**----*****----**-*****",
           "*****-**----*****----**-*****",
           "*****-**----*****----**-*****",
           "*****-******--b--******-*****",
           "*****-******-***-******-*****",
-          "@-----******-***-******p----t",
+          "@----p******-***-******p----t",
           "*****-******-***-******-*****",
           "*****---b----***--------*****",
           "*****************************",
@@ -576,33 +576,55 @@ isBoardSolvable board =
 
 
 -- Search all possible paths to complete game
-searchAllPath :: Board -> (Int,Int,Char) -> [(Int,Int,Char)] -> [(Int,Int)] -> [[(Int,Int,Char)]] 
-searchAllPath board (i,j,dir) paths visited 
+searchAllPath :: Board -> (Int,Int,Char,Char) -> [(Int,Int,Char,Char)] -> [(Int,Int)] -> [[(Int,Int,Char,Char)]] 
+searchAllPath board (i,j,dir,item) paths visited 
     | ((i,j) `elem` visited) = [] 
-    | (getItemFromPosTuple board (i,j) == target) =  [new_path]
-    | (getItemFromPosTuple board (i,j) == bonus) = concat [ searchAllPath new_board next new_path [] | next <- traversable_positions ]
-    | otherwise = concat [ searchAllPath board next new_path updated_visited | next <- traversable_positions ]
+    | (item == target) =  [new_path]
+    | (item == bonus) = concat [ searchAllPath new_board next new_path [] | next <- tp_item ]
+    | otherwise = concat [ searchAllPath board next new_path updated_visited | next <- tp_item ]
     where neighbors = getNeighbors (i,j,dir) board
           new_board = edit2DArray i j '-' board
           traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
-          new_path = paths ++ [(i,j,dir)]
+          tp_item = [ (ii,jj,dd, getItemFromPosTuple board (ii,jj) ) | (ii,jj,dd) <- traversable_positions ]
+          new_path = paths ++ [(i,j,dir, item)]
           updated_visited = visited ++ [(i,j)]
 
 
-withBonus :: [(Int,Int)] -> [[(Int,Int,Char)]] ->  [[(Int,Int,Char)]]
-withBonus bonuses [] = [] 
-withBonus bonuses (p:paths) = 
-    let path_coord = [ (i,j) | (i,j,dir) <- p]
-        hasAllBonus = (intersect bonuses path_coord == bonuses)
-        rest_path = withBonus bonuses paths
-    in if hasAllBonus then [p] ++ rest_path else [] ++ rest_path
 
-pathWithThreeBonus :: Board -> [[(Int,Int,Char)]]
+
+withBonus :: [(Int,Int)] -> Int -> [[(Int,Int,Char,Char)]] ->  [[(Int,Int,Char,Char)]]
+withBonus bonuses n [] = [] 
+withBonus bonuses n (p:paths) = 
+    let path_coord = [ (i,j) | (i,j,_,_) <- p]
+        has_N_Bonus = (length (intersect bonuses path_coord) == n)
+        rest_path = withBonus bonuses n paths
+    in if has_N_Bonus then [p] ++ rest_path else [] ++ rest_path
+
+pathWithThreeBonus :: Board -> [[(Int,Int,Char,Char)]]
 pathWithThreeBonus board = 
     let bonuses = findBonusPos board 
         (i,j) = findPlayerPos board
-        all_paths = searchAllPath board (i,j,'A') [] []
-    in withBonus bonuses all_paths
+        all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] []
+    in withBonus bonuses 3 all_paths
+
+
+shortestElementFromList :: Foldable t => [t a] -> t a
+shortestElementFromList paths = head (sortOn length paths) 
+
+optimalPath :: Board -> [String]
+optimalPath board  
+    | length three_bonus > 0 = shortestElementFromList (map reformatPath three_bonus)
+    | length two_bonus > 0 = shortestElementFromList (map reformatPath two_bonus) 
+    | length one_bonus > 0 = shortestElementFromList (map reformatPath one_bonus)
+    | length no_bonus > 0 =  shortestElementFromList (map reformatPath no_bonus)
+    where bonuses = findBonusPos board
+          (i,j) = findPlayerPos board
+          all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] []
+          three_bonus = withBonus bonuses 3 all_paths
+          two_bonus = withBonus bonuses 2 all_paths
+          one_bonus = withBonus bonuses 1 all_paths 
+          no_bonus = withBonus bonuses 0 all_paths
+
 
 
 squashMoves :: [Char] -> [Char]
@@ -618,10 +640,10 @@ testSearchAllPath board =
     let (i,j) = findPlayerPos board 
         bonusPositions = findBonusPos board
         end_pos = findTargetPos board 
-        start_pos_direction = (i,j, 'A')
+        start_pos_direction = (i,j, 'A', getItemFromPosTuple board (i,j))
         paths = searchAllPath board start_pos_direction [] []
-        paths_string = [ [ dir | (x,y,dir) <- path] | path <-paths]
-        result = map squashMoves paths_string
+        paths_string = [ [ (dir,item) | (x,y,dir,item) <- path] | path <-paths]
+        result = map squashDirections paths_string
     in  result
 
 
@@ -630,18 +652,45 @@ path_construct = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'
 path_construct2 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','-'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
 path_construct3 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','p'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
 
+path_construct4 = [(2,2,'R','-'), (2,2,'R','p'),  (2,2,'D','-')  , (2,2,'D','y') , (2,2,'D','y')    ]
 
 
 
-
-squashDirections :: [(Char,Char)] -> [(Char,Char)]
+squashDirections :: [(Char,Char)] -> [Char]
 squashDirections [] = []
-squashDirections [x] = [x]
+squashDirections [(d,i)] = [d]
 squashDirections (x1:x2:xs)
-    | x1==x2 = squashDirections (x2:xs)
-    | otherwise = x1:squashDirections (x2:xs)
+    | dir1==dir2 = squashDirections (x2:xs)
+    | item1 `elem` conditionals = [dir1] ++ [item1] ++ squashDirections (x2:xs)
+    | otherwise = dir1:squashDirections (x2:xs)
+    where (dir1,item1) = x1
+          (dir2,item2) = x2 
+
+
+charToCommandMapping :: Char -> String 
+charToCommandMapping chr 
+    | chr == 'R' = "Right"
+    | chr == 'L' =  "Left"
+    | chr == 'U' = "Up"
+    | chr == 'D' = "Down"
+    | chr == 'p' = "Cond{p}{"
+    | chr == 'o' = "Cond{o}{"
+    | chr == 'y' = "Cond{y}{"
+    | otherwise = ""
+
+dirStrToCommands :: String -> String
+dirStrToCommands [] = []
+dirStrToCommands [x] = charToCommandMapping x 
+dirStrToCommands (x:y:str) 
+    | x `elem` conditionals = charToCommandMapping x ++ charToCommandMapping y ++ "}" ++ " " ++ dirStrToCommands str 
+    | otherwise = charToCommandMapping x ++ " " ++ dirStrToCommands (y:str)
 
 
 
-reformatPath :: [(Integer,Integer,Char,Char)] -> [(Char,Char)]
-reformatPath paths =  squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]
+
+reformatPath :: [(Int,Int,Char,Char)] -> [String]
+reformatPath paths =  words (dirStrToCommands (squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]))
+
+
+printOutList :: [String] -> IO ()
+printOutList list = do putStrLn (unlines list)
