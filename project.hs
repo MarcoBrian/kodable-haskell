@@ -1,45 +1,72 @@
-
-import System.IO  
+import System.IO 
 import Prelude
 import Parser
-
 import Data.Char 
 import Data.List
+import Control.Exception
 
 
-{-- Section: Command Parsers--}
-colorParser :: Parser Char
-colorParser = char 'p' +++ char 'o' +++ char 'y'  
+{-- Section: Data types --}
+type Item = Char
+type Board = [[Item]]
+type Direction = String
+type Point = (Int,Int,Char)
 
-directionParser :: Parser String 
-directionParser = string "Right" +++ string "Left" +++ string "Up" +++ string "Down" 
+data Move = Cond Item Direction | D Direction deriving (Eq)
+data Command = Function | Loop Int Move Move | M Move deriving (Eq)
 
-numberParser :: Parser Char 
-numberParser = char '1' +++ char '2' +++ char '3' +++ char '4' +++ char '5' 
+instance Show Move where
+    show (D direction) = direction
+    show (Cond cond direction) = "Cond{" ++ [cond] ++ "}" ++ "{"++ direction  ++"}" 
 
-loopParser :: Parser (Int, String, String)
-loopParser = do string "Loop"
-                char '{'
-                number <- numberParser 
-                char '}'  
-                char '{'
-                direction1 <- directionParser
-                char ','
-                direction2 <- directionParser
-                char '}'
-                return (digitToInt number,direction1,direction2)
+instance Show Command where
+    show (Loop i m1 m2) = "Loop{" ++ show i ++ "}{" ++ show m1 ++ "," ++ show m2 ++ "}"
+    show (Function) = "Function" 
+    show (M m) = show m
 
-conditionalParser :: Parser (Char,String)
-conditionalParser = do string "Cond"
-                       char '{'
-                       color <- colorParser
-                       char '}' 
-                       char '{'
-                       direction <- directionParser
-                       char '}'
-                       return (color,direction)
+data GameMap = GameMap 
+               { getBoard :: Board ,
+                 getHeight :: Int,
+                 getWidth :: Int,
+                 getCondPos :: [Point],
+                 getPlayerPos :: (Int,Int), 
+                 getTargetPos :: (Int,Int),
+                 playerWon :: Bool
+                }  
 
 
+{-- ‘@’ represents the ball.
+    ‘-’ represents a path block that the ball could roll on.
+    ’*’ represents the grass (obstacles).
+    ‘p’ represents the tile of the path’s block color is the special color : pink.
+    ‘o’ represents the tile of the path’s block color is the special color : orange.
+    ‘y’ represents the tile of the path’s block color is the special color : yellow.
+    ‘b’ represents the bonus (the stars in Kodable).
+    ‘t’ represents the target point --}
+ball::Item
+ball = '@'
+path :: Item 
+path = '-'
+grass :: Item
+grass = '*'
+pink :: Item
+pink = 'p'
+orange :: Item 
+orange = 'o'
+yellow :: Item 
+yellow = 'y' 
+bonus :: Item
+bonus = 'b'
+target :: Item
+target = 't'
+conditionals :: [Item] 
+conditionals = [orange,yellow,pink]
+
+
+
+
+
+{-- Section : Helper utility functions --}
 
 whitespaces :: String
 whitespaces = " \n\r\t\f\v"
@@ -58,6 +85,10 @@ isRectangle :: [String] -> Bool
 isRectangle contents = allEqual content_lengths
     where content_lengths = map length contents
 
+    
+boardToStr :: Board -> String
+boardToStr board = unlines (map (intersperse ' ') board)
+
 findPlayerPos :: Board -> (Int,Int)
 findPlayerPos board = head $ [ (i,j) | (row, i) <- zip board [0..] ,  j <- elemIndices ball row ]
 
@@ -72,51 +103,6 @@ findConditionalsPos board = [ (i,j,orange) | (row, i) <- zip board [0..] ,  j <-
                      [ (i,j,pink) | (row, i) <- zip board [0..] ,  j <- elemIndices pink row ] ++
                      [ (i,j,yellow) | (row, i) <- zip board [0..] ,  j <- elemIndices yellow row ] 
 
-
-type Item = Char
-type Board = [[Item]]
-type Direction = String
-type Point = (Int,Int,Char)
-
-boardToStr :: Board -> String
-boardToStr board = unlines (map (intersperse ' ') board)
-
--- ‘@’ represents the ball.
-ball::Item
-ball = '@'
--- ‘-’ represents a path block that the ball could roll on.
-path :: Item 
-path = '-'
--- ’*’ represents the grass (obstacles).
-grass :: Item
-grass = '*'
--- ‘p’ represents the tile of the path’s block color is the special color : pink.
-pink :: Item
-pink = 'p'
--- ‘o’ represents the tile of the path’s block color is the special color : orange.
-orange :: Item 
-orange = 'o'
--- ‘y’ represents the tile of the path’s block color is the special color : yellow.
-yellow :: Item 
-yellow = 'y' 
--- ‘b’ represents the bonus (the stars in Kodable).
-bonus :: Item
-bonus = 'b'
--- ‘t’ represents the target point.
-target :: Item
-target = 't'
-
-
-conditionals :: [Item] 
-conditionals = [orange,yellow,pink]
-
-data GameMap = GameMap 
-               { getBoard :: Board ,
-                 getHeight :: Int,
-                 getWidth :: Int,
-                 getPlayerPos :: (Int,Int), 
-                 playerWon :: Bool
-                }  
 
 charToItem :: Char -> Item 
 charToItem x 
@@ -137,41 +123,184 @@ stringToItems (x:xs) = [(charToItem x)] ++ stringToItems xs
 
 
 
-kodableEmptyMap :: IO () 
-kodableEmptyMap = kodable "poopster"
+validPosition :: (Int,Int) -> Board -> Bool 
+validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
+    where height = length board
+          width = length (board !! 0)
 
-kodable :: String -> IO () 
-kodable des = do 
+{-- Section: Command Parsers--}
+colorParser :: Parser Char
+colorParser = char 'p' +++ char 'o' +++ char 'y'  
+
+directionParser :: Parser Direction 
+directionParser = string "Right" +++ string "Left" +++ string "Up" +++ string "Down" 
+
+directionMoveParser :: Parser Move
+directionMoveParser = do dir <-directionParser
+                         return (D dir) 
+
+
+numberParser :: Parser Char 
+numberParser = char '1' +++ char '2' +++ char '3' +++ char '4' +++ char '5' 
+
+
+commandParser :: Parser Command 
+commandParser = functionParser +++ loopParser +++ moveParser
+
+moveParser :: Parser Command
+moveParser = do move <- (conditionalParser +++ directionMoveParser)
+                return (M move) 
+
+functionParser :: Parser Command 
+functionParser = do x <- string "Function"
+                    if x == "Function"
+                        then return Function
+                    else failure 
+
+loopParser :: Parser Command
+loopParser = do string "Loop"
+                char '{'
+                number <- numberParser 
+                char '}'  
+                char '{'
+                direction1 <- directionMoveParser +++ conditionalParser
+                char ','
+                direction2 <- directionMoveParser +++ conditionalParser
+                char '}'
+                return (Loop (digitToInt number) direction1 direction2)
+
+conditionalParser :: Parser Move
+conditionalParser = do string "Cond"
+                       char '{'
+                       color <- colorParser
+                       char '}' 
+                       char '{'
+                       direction <- directionParser
+                       char '}'
+                       return (Cond color direction)
+
+
+emptyGameMap :: GameMap
+emptyGameMap = GameMap {getBoard=[],
+                        getHeight=0,
+                        getCondPos=[],
+                        getWidth=0,
+                        getPlayerPos=(0,0),
+                        getTargetPos=(0,0),
+                        playerWon=False}
+
+information :: IO ()
+information = do putStrLn "-- Kodable Game Commands -----------------"
+                 putStrLn "- load - load map from txt file          -"
+                 putStrLn "- check - check is the map is solvable   -"
+                 putStrLn "- solve - give a solution for the map    -"
+                 putStrLn "- quit - quit the game                   -"
+                 putStrLn "- play - interactive action from player  -"
+                 putStrLn "------------------------------------------"
+
+start_kodable :: IO () 
+start_kodable = do information 
+                   kodable emptyGameMap
+
+solveIO :: GameMap -> IO () 
+solveIO gamemap = if isBoardSolvable (getBoard gamemap)
+                        then do putStrLn "A solution to this game:" 
+                                putStrLn (intercalate " " $ optimalPath (getBoard gamemap))
+                                kodable gamemap
+                  else do putStrLn "This board cannot be solved, quitting game.."
+                          return ()
+
+
+checkIO :: GameMap -> IO ()
+checkIO gamemap = if isBoardSolvable (getBoard gamemap) 
+                     then do putStrLn "This board is solvable!"
+                             kodable gamemap 
+                  else do putStrLn "This board cannot be solved, quitting game.." 
+                          return ()
+
+quitIO :: IO () 
+quitIO = do putStrLn "Quitting game.." 
+            return () 
+
+
+loadIO :: [String] -> IO ()
+loadIO command_list = do game_map <- loadFile (command_list !! 1)
+                         kodable game_map
+
+kodable :: GameMap -> IO ()
+kodable gamemap = do 
     putStr ">"
     command <- getLine
     let command_list = words command
     if head command_list == "quit"
-        then do return ()
-    else if (head command_list == "load" && (length command_list == 2))
-        then do gamemap <- loadFile (command_list !! 1)
-                des <- getLine
-                putStr (boardToStr $ getBoard gamemap)
-                kodable des
-    else if head command_list == "play"
-        then do direction_list <- play [] 
-                putStrLn (show direction_list)
-    else do kodable des
+        then quitIO
+    else if (head command_list == "check")
+        then checkIO gamemap
+    else if (head command_list == "solve")
+        then solveIO gamemap
+    else if (head command_list == "load")
+            then if (length command_list == 2)
+                    then do loadIO command_list
+            else do putStrLn "~ ~ Please input one filename as argument ~ ~"
+                    kodable gamemap
 
+    else if head command_list == "play"
+            then playLoop gamemap
+
+    else do kodable gamemap
+
+
+isTargetReached :: GameMap -> Bool
+isTargetReached gamemap = (target_pos==player_pos)
+    where target_pos = getTargetPos gamemap 
+          player_pos = getPlayerPos gamemap 
+
+playLoop :: GameMap -> IO ()
+playLoop gamemap = do direction_list <- play []
+                      putStrLn (show direction_list)
+                      new_gamemap <- (moveFullyList gamemap direction_list)
+                      if isTargetReached new_gamemap 
+                          then do putStrLn "You reached the target!"
+                                  return () 
+                      else playLoop new_gamemap
 
 directions :: [String]
 directions = ["Left","Right","Up","Down"]
 
+refreshBoard :: Board -> [Point] -> Board 
+refreshBoard board [] = board
+refreshBoard board (p:ps) = refreshBoard new_board ps
+    where (i,j,color) = p
+          new_board = edit2DArray i j color board
 
+refreshGameMap :: GameMap -> GameMap 
+refreshGameMap game_map = GameMap { getBoard=refreshed_board,
+                                    getHeight = height, 
+                                    getWidth = width,
+                                    getCondPos=cond_pos,
+                                    getPlayerPos=player_pos,
+                                    getTargetPos=target_pos,
+                                    playerWon=has_won } 
+    where board  = getBoard game_map 
+          cond_pos = getCondPos game_map
+          refreshed_board = refreshBoard board cond_pos 
+          height = getHeight game_map 
+          width = getWidth game_map 
+          player_pos = getPlayerPos game_map 
+          has_won = playerWon game_map 
+          target_pos = getTargetPos game_map
 
-getPlayDirection :: [String] -> IO [Direction]
+getPlayDirection :: [Command] -> IO [Command]
 getPlayDirection xs = do command <- getLine
                          let stripped_command = stripWhiteSpaces command -- take away trailing whitespaces
-                         if (not $ null command) && (not $ null $ elemIndices stripped_command directions) 
-                            then do play (xs ++ [stripped_command])
+                             parsed_command = runParser commandParser stripped_command
+                             parsed_command_type = fst $ head parsed_command
+                         if (not $ null command) && (not $ null $ parsed_command) 
+                            then do play (xs ++ [parsed_command_type])
                          else do return xs
 
 -- invalid input will cause the play IO to return 
-play :: [String] -> IO [Direction]
+play :: [Command] -> IO [Command]
 play xs = do if null xs
                 then do putStr "First   Direction : "
                         getPlayDirection xs
@@ -186,55 +315,32 @@ loadFile filepath = do
     handle <- openFile filepath ReadMode  
     contents <- hGetContents handle
     let cleanboard = map stringToItems (map stripWhiteSpaces (lines contents))
+        rectangular = isRectangle cleanboard
         boardHeight = length cleanboard
         boardWidth = length (head cleanboard)
+        target_pos = findTargetPos cleanboard
+        cond_pos = findConditionalsPos cleanboard
         playerPos = findPlayerPos cleanboard
         new_map = GameMap {getBoard=cleanboard, 
                            getHeight=boardHeight, 
                            getWidth=boardWidth, 
+                           getCondPos = cond_pos, 
+                           getTargetPos = target_pos,
                            getPlayerPos = playerPos,
                            playerWon = False}
-    -- check if map is solvable and is rectangular
-    putStrLn "Read map successfully!"
-    putStrLn (show cleanboard)
-    putStrLn (boardToStr cleanboard)
-    putStrLn (show playerPos)
-    hClose handle  
-    return new_map
+    -- check if map is rectangular
+    if rectangular
+        then do putStrLn "Read map successfully!"
+                putStrLn "Initial:"
+                putStrLn (boardToStr cleanboard)
+                hClose handle  
+                return new_map 
+    else (do putStrLn "This map is not in the correct format"
+             putStrLn "Map must be rectangular shaped"
+             putStrLn "Please load another map to play"
+             hClose handle  
+             return emptyGameMap)
 
-
-
-
--- TODO will delete
-test = do xs <- loadFile "map1-2.txt"
-          let new_pos = moveFully xs "Right"
-              new_pos2 = moveFully new_pos "Down"
-              new_pos3 = moveFully new_pos2 "Right"
-              new_pos4 = moveFully new_pos3 "Up"
-              new_pos5 = moveFully new_pos4 "Right"
-              new_pos6 = moveFully new_pos5 "Down"
-              new_pos7 = moveFully new_pos6 "Right"
-              new_pos8 = moveFully new_pos7 "Up"
-              new_pos9 = moveFully new_pos8 "Up"
-              new_pos10 = moveFully new_pos9 "Left"
-              a = moveFully new_pos10 "Right"
-              b = moveFully a "Left"
-              c = moveFully b "Right"
-              e = moveFully c "Left"
-              f = moveFully e "Right"
-              g = moveFully f "Left"
-              h = moveFully g "Right"
-              i = moveFully h "Left"
-              j = moveFully i  "Right"
-              k  = moveFully j "Left"
-              l  = moveFully k "Right"
-              m = moveFully l "Left"
-              n = moveFully m "Right"
-              o = moveFully n "Left"
-
-
-          putStrLn (boardToStr $ getBoard o)
-          putStrLn (show $ getPlayerPos o)
 
 
 
@@ -248,13 +354,38 @@ getItemFromPosTuple board (i,j) = if validPosition (i,j) board then (board !! i)
 
 
 
+
+-- check if next item is a bonus 
+testBonus :: GameMap -> Direction -> Bool  
+testBonus game_map direction 
+        | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) == bonus)
+        | direction == "Right" = (j<width) && (getItemFromPos board i (j+1) == bonus)
+        | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j == bonus) 
+        | direction == "Down" = (i<height-1) && (getItemFromPos board (i+1) j == bonus )
+        where (i,j) = getPlayerPos game_map 
+              board = getBoard game_map
+              width = getWidth game_map 
+              height = getHeight game_map
+
 -- check if item is traversable (not grass)
 testDirection :: GameMap -> Direction -> Bool  
 testDirection game_map direction 
         | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) /= grass)
-        | direction == "Right" = (j<width) && (getItemFromPos board i (j+1) /= grass)
+        | direction == "Right" = (j<width-1) && (getItemFromPos board i (j+1) /= grass)
         | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j /= grass) 
         | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j /= grass)
+        where (i,j) = getPlayerPos game_map 
+              board = getBoard game_map
+              width = getWidth game_map 
+              height = getHeight game_map
+
+-- check if item is conditional specifically on the color 
+testDirectionConditionalSpecific :: GameMap -> Item -> Direction -> Bool  
+testDirectionConditionalSpecific game_map color direction 
+        | direction == "Left" = (j >= 1) && (getItemFromPos board i (j-1) == color)
+        | direction == "Right" = (j<width) && (getItemFromPos board i (j+1) == color )
+        | direction == "Up" = (i>=1) && (getItemFromPos board (i-1) j == color ) 
+        | direction == "Down" = (i<height) && (getItemFromPos board (i+1) j == color)
         where (i,j) = getPlayerPos game_map 
               board = getBoard game_map
               width = getWidth game_map 
@@ -277,25 +408,123 @@ testDirectionConditional game_map direction
 updateBoard :: GameMap -> Board -> Int -> Int -> GameMap 
 updateBoard game_map board new_i new_j = GameMap {getBoard = board, 
                                                   getHeight= height,
-                                                  getWidth = width,               
+                                                  getWidth = width,   
+                                                  getCondPos = cond_pos,
+                                                  getTargetPos = target_pos,         
                                                   getPlayerPos = (new_i,new_j),
                                                   playerWon = False
                                                  }
     where height = getHeight game_map
           width = getWidth game_map
+          cond_pos = getCondPos game_map
+          target_pos = getTargetPos game_map
 
--- if game across a condition then we do one more 
--- else if game come across bonus then we add the bonus to the gameMap (increment bonus point) 
--- else if game come across path then recursion 
--- else just return the game
--- dont stop when meeting conditional unless the direction is conditional. 
-moveFully :: GameMap -> Direction -> GameMap
-moveFully game_map direction =
-    if testDirectionConditional game_map direction
-        then moveOneStep game_map direction
-    else if testDirection game_map direction
-        then moveFully (moveOneStep game_map direction) direction
-    else game_map
+
+commandIsDirection :: Command -> Bool 
+commandIsDirection cmd = case cmd of (M (D direction)) -> True 
+                                     _ -> False 
+
+commandIsCond :: Command -> Bool 
+commandIsCond cmd = case cmd of (M (Cond item dir)) -> True 
+                                _ -> False
+
+moveFullyList :: GameMap -> [Command] -> IO GameMap
+moveFullyList game_map [] = return game_map     
+moveFullyList game_map [(M (Cond _ _))] = return game_map       
+moveFullyList game_map [cmd] = 
+    let (M (D dir)) = cmd
+        moveDir = moveOneStep game_map dir 
+        ref_moveDir = refreshGameMap moveDir
+        dirTested = testDirection game_map dir
+        dirBonus = testBonus game_map dir
+    in if dirTested && dirBonus 
+        then do putStrLn "You got a bonus"
+                new_gamemap <- (moveFullyList ref_moveDir [cmd])
+                return new_gamemap
+        else if dirTested
+                then do new_gamemap <- (moveFullyList ref_moveDir [cmd])
+                        return new_gamemap
+        else do putStrLn (boardToStr $ getBoard game_map)
+                return game_map
+
+moveFullyList game_map (cmd1:cmd2:cmds) 
+    | (commandIsDirection cmd1) && (commandIsDirection cmd2) =
+        (if dir1Tested && dir1Bonus 
+            then do putStrLn ("You got a bonus!")
+                    new_game <- moveFullyList ref_moveDir1 full_commands
+                    return new_game
+        else if dir1Tested 
+                then do new_game <- moveFullyList ref_moveDir1 full_commands
+                        return (refreshGameMap new_game)
+        else do putStrLn (boardToStr $ getBoard game_map)
+                new_game <- moveFullyList moveDir2 new_commands
+                return new_game)
+    | (commandIsDirection cmd1) && (commandIsCond cmd2) = 
+        if dir1TestConditional && dir2TestConditionalSpecific
+            then do putStrLn (boardToStr $ getBoard game_map)
+                    new_game <- moveFullyList moveDir1 cond_commands
+                    return new_game
+        else if dir1Tested && dir1Bonus 
+                then do putStrLn ("You got a bonus!")
+                        new_game <- moveFullyList ref_moveDir1 full_commands
+                        return new_game 
+        else if dir1Tested 
+                then do new_game <- moveFullyList ref_moveDir1 full_commands
+                        return new_game
+        else do putStrLn (boardToStr $ getBoard game_map)
+                return game_map
+    where (M (D dir1)) = cmd1
+          (M (D dir2)) = cmd2
+          (M (Cond color direction3)) = cmd2
+          dir1Tested = testDirection game_map dir1
+          dir2Tested = testDirection game_map dir2 
+          dir1TestConditional = testDirection game_map dir1 
+          dir2TestConditionalSpecific = testDirectionConditionalSpecific game_map color dir1 
+          moveDir1 = moveOneStep game_map dir1 
+          moveDir2 = moveOneStep game_map dir2
+          ref_moveDir1 = refreshGameMap moveDir1
+          full_commands = (cmd1:cmd2:cmds)
+          new_commands = (cmd2:cmds)
+          cond_commands = ((M (D direction3)):cmds)
+          dir1Bonus = testBonus game_map dir1
+          dir2Bonus = testBonus game_map dir2  
+
+
+
+
+                                             
+
+
+-- moveFully :: GameMap -> Command -> GameMap
+-- moveFully game_map cmd 
+--     | testDirectionConditional game_map direction = moveOneStep game_map direction
+--     | testDirection game_map direction =  moveFully (moveOneStep game_map direction) cmd 
+--     | otherwise = game_map
+--     where (M (D direction)) = cmd
+
+
+-- TODO will delete
+test = do xs <- loadFile "test.txt"
+          directions <- play []
+          res <- moveFullyList xs directions 
+          putStrLn (show $ getPlayerPos res)
+          putStrLn (boardToStr $ getBoard (refreshGameMap res))
+          putStrLn (show $ getCondPos res)
+
+
+
+-- -- if game across a condition then we do one more 
+-- -- else if game come across bonus then we add the bonus to the gameMap (increment bonus point) 
+-- -- else if game come across path then recursion 
+-- -- else just return the game
+-- -- dont stop when meeting conditional unless the direction is conditional. 
+-- moveFully :: GameMap -> Direction -> GameMap
+-- moveFully game_map direction =
+--     if testDirectionConditional game_map direction
+--         then moveOneStep game_map direction
+--     else if testDirection game_map direction
+--         then moveFully (moveOneStep game_map direction) direction
+--     else game_map
 
 moveOneStep :: GameMap -> Direction -> GameMap  
 moveOneStep game_map direction 
@@ -443,7 +672,7 @@ sample_board2= ["*****-------------------*****",
                 "*****-******-***-******-***-*",
                 "@-----******-***-******-----t",
                 "*****-******-***-******-*****",
-                "*****-------****--------*****",
+                "*****-------****---b----*****",
                 "*****************************",
                 "*****************************"]
 
@@ -455,11 +684,11 @@ sample_board3= ["*****-------------------*****",
                 "*****-**----*****----**-*****",
                 "*****-**-yy-*****-yy-**-*****",
                 "*****-**----*****----**-*****",
-                "*****-******--b--******-*****",
+                "*****-******--*b-******p----*",
+                "*****-******-***-******-***-*",
+                "@-----******-***-******-----t",
                 "*****-******-***-******-*****",
-                "@-----******-***-******p----t",
-                "*****-******-***-******-*****",
-                "*****--------***----*---*****",
+                "*****--------***--------*****",
                 "*****************************",
                 "*****************************"]
 
@@ -469,7 +698,7 @@ map2_2 = ["*****-------------------*****",
           "*****-**----*****----**-*****",
           "*****-**----*****----**-*****",
           "*****-**----*****----**-*****",
-          "*****-******--b--******-*****",
+          "*****-******--b-*******-*****",
           "*****-******-***-******-*****",
           "@----p******-***-******p----t",
           "*****-******-***-******-*****",
@@ -479,10 +708,6 @@ map2_2 = ["*****-------------------*****",
 
 
 
-validPosition :: (Int,Int) -> Board -> Bool 
-validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
-    where height = length board
-          width = length (board !! 0)
 
 
 
@@ -565,6 +790,7 @@ pathToEnd board =
     in  reverse (bfsTraversePath [start_pos_direction] end_pos [] [] board)
 
 isBoardSolvable :: Board -> Bool 
+isBoardSolvable [] = False
 isBoardSolvable board =
     let (i,j) = findPlayerPos board 
         end_pos = findTargetPos board 
@@ -574,20 +800,25 @@ isBoardSolvable board =
 
 
 
+isTraversable :: (Int,Int,Char) -> Board -> Bool
+isTraversable (i,j,_)  board = isValidPos && (itemAtPos /= grass)
+    where isValidPos = validPosition (i,j) board
+          itemAtPos = getItemFromPos board i j 
 
 -- Search all possible paths to complete game
-searchAllPath :: Board -> (Int,Int,Char,Char) -> [(Int,Int,Char,Char)] -> [(Int,Int)] -> [[(Int,Int,Char,Char)]] 
-searchAllPath board (i,j,dir,item) paths visited 
-    | ((i,j) `elem` visited) = [] 
+searchAllPath :: Board -> (Int,Int,Char,Char) -> [(Int,Int,Char,Char)] -> [(Int,Int)] -> Bool -> [[(Int,Int,Char,Char)]] 
+searchAllPath board (i,j,dir,item) paths visited bonusFound 
+    | ((i,j) `elem` visited) = if bonusFound then concat [ searchAllPath board next new_path updated_visited False | next <- tp_item ] else [] 
     | (item == target) =  [new_path]
-    | (item == bonus) = concat [ searchAllPath new_board next new_path [] | next <- tp_item ]
-    | otherwise = concat [ searchAllPath board next new_path updated_visited | next <- tp_item ]
+    | (item == bonus) = concat [ searchAllPath new_board next new_path [] bonusF | next <- tp_item ]
+    | otherwise = concat [ searchAllPath board next new_path updated_visited bonusF | next <- tp_item ]
     where neighbors = getNeighbors (i,j,dir) board
           new_board = edit2DArray i j '-' board
-          traversable_positions = filter (\pos -> traversablePosition pos visited board) neighbors
+          traversable_positions = filter (\pos -> isTraversable pos board) neighbors
           tp_item = [ (ii,jj,dd, getItemFromPosTuple board (ii,jj) ) | (ii,jj,dd) <- traversable_positions ]
           new_path = paths ++ [(i,j,dir, item)]
           updated_visited = visited ++ [(i,j)]
+          bonusF = bonusFound || (item == bonus)
 
 
 
@@ -604,7 +835,7 @@ pathWithThreeBonus :: Board -> [[(Int,Int,Char,Char)]]
 pathWithThreeBonus board = 
     let bonuses = findBonusPos board 
         (i,j) = findPlayerPos board
-        all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] []
+        all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] [] False
     in withBonus bonuses 3 all_paths
 
 
@@ -619,20 +850,13 @@ optimalPath board
     | length no_bonus > 0 =  shortestElementFromList (map reformatPath no_bonus)
     where bonuses = findBonusPos board
           (i,j) = findPlayerPos board
-          all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] []
+          all_paths = searchAllPath board (i,j,'A',getItemFromPosTuple board (i,j)) [] [] False
           three_bonus = withBonus bonuses 3 all_paths
           two_bonus = withBonus bonuses 2 all_paths
           one_bonus = withBonus bonuses 1 all_paths 
           no_bonus = withBonus bonuses 0 all_paths
 
 
-
-squashMoves :: [Char] -> [Char]
-squashMoves [] = []
-squashMoves [x] = [x]
-squashMoves (x1:x2:xs)
-    | x1==x2 = squashMoves (x2:xs)
-    | otherwise = x1:squashMoves (x2:xs)
 
 
 testSearchAllPath :: Board -> [String]
@@ -641,9 +865,9 @@ testSearchAllPath board =
         bonusPositions = findBonusPos board
         end_pos = findTargetPos board 
         start_pos_direction = (i,j, 'A', getItemFromPosTuple board (i,j))
-        paths = searchAllPath board start_pos_direction [] []
+        paths = searchAllPath board start_pos_direction [] [] False
         paths_string = [ [ (dir,item) | (x,y,dir,item) <- path] | path <-paths]
-        result = map squashDirections paths_string
+        result = map dirStrToCommands (map squashDirections paths_string)
     in  result
 
 
