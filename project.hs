@@ -29,10 +29,13 @@ data GameMap = GameMap
                  getHeight :: Int,
                  getWidth :: Int,
                  getCondPos :: [Point],
+                 getFunction :: [Command],
                  getPlayerPos :: (Int,Int), 
                  getTargetPos :: (Int,Int),
                  playerWon :: Bool
                 }  
+
+
 
 
 {-- ‘@’ represents the ball.
@@ -122,7 +125,6 @@ stringToItems [] = []
 stringToItems (x:xs) = [(charToItem x)] ++ stringToItems xs 
 
 
-
 validPosition :: (Int,Int) -> Board -> Bool 
 validPosition (i,j) board = (i >= 0 && i < height) && (j >= 0 && j < width)
     where height = length board
@@ -138,7 +140,6 @@ directionParser = string "Right" +++ string "Left" +++ string "Up" +++ string "D
 directionMoveParser :: Parser Move
 directionMoveParser = do dir <-directionParser
                          return (D dir) 
-
 
 numberParser :: Parser Char 
 numberParser = char '1' +++ char '2' +++ char '3' +++ char '4' +++ char '5' 
@@ -179,27 +180,30 @@ conditionalParser = do string "Cond"
                        char '}'
                        return (Cond color direction)
 
-
+-- Initialize empty game map
 emptyGameMap :: GameMap
 emptyGameMap = GameMap {getBoard=[],
                         getHeight=0,
                         getCondPos=[],
                         getWidth=0,
+                        getFunction = [],
                         getPlayerPos=(0,0),
                         getTargetPos=(0,0),
                         playerWon=False}
 
-information :: IO ()
-information = do putStrLn "-- Kodable Game Commands -----------------"
-                 putStrLn "- load - load map from txt file          -"
-                 putStrLn "- check - check is the map is solvable   -"
-                 putStrLn "- solve - give a solution for the map    -"
-                 putStrLn "- quit - quit the game                   -"
-                 putStrLn "- play - interactive action from player  -"
-                 putStrLn "------------------------------------------"
+informationIO :: IO ()
+informationIO = do putStrLn "-- Kodable Game Commands ------------------"
+                   putStrLn "- load - load map from txt file          --"
+                   putStrLn "- check - check is the map is solvable   --"
+                   putStrLn "- solve - give a solution for the map    --"
+                   putStrLn "- quit - quit the game                   --"
+                   putStrLn "- play - interactive action from player  --"
+                   putStrLn "-                                         -"
+                   putStrLn "~ Please load a valid map before starting ~"
+                   putStrLn "-------------------------------------------"
 
 start_kodable :: IO () 
-start_kodable = do information 
+start_kodable = do informationIO 
                    kodable emptyGameMap
 
 solveIO :: GameMap -> IO () 
@@ -232,7 +236,9 @@ kodable gamemap = do
     putStr ">"
     command <- getLine
     let command_list = words command
-    if head command_list == "quit"
+    if null command_list -- empty input restart cursor 
+        then kodable gamemap
+    else if head command_list == "quit"
         then quitIO
     else if (head command_list == "check")
         then checkIO gamemap
@@ -243,12 +249,42 @@ kodable gamemap = do
                     then do loadIO command_list
             else do putStrLn "~ ~ Please input one filename as argument ~ ~"
                     kodable gamemap
-
     else if head command_list == "play"
-            then playLoop gamemap
-
+            then if isBoardSolvable (getBoard gamemap)
+                    then if (length command_list == 4) -- if command is 4 there is function definition
+                            then do let functions = (convertStringForFunction $ tail command_list)
+                                        in if length functions == 3 
+                                                then playLoop (initFunctionInGameMap gamemap functions)
+                                           else playLoop gamemap
+                         else playLoop gamemap
+                 else do putStrLn "~ ~ Please load a solvable map first ~ ~"
+                         kodable gamemap
     else do kodable gamemap
 
+
+initFunctionInGameMap :: GameMap -> [Command] -> GameMap 
+initFunctionInGameMap game_map function_def = GameMap {getBoard = board, 
+                                                    getHeight= height,
+                                                    getWidth = width,   
+                                                    getCondPos = cond_pos,
+                                                    getFunction = function_def,
+                                                    getTargetPos = target_pos,         
+                                                    getPlayerPos = playerPos,
+                                                    playerWon = False
+                                                 }
+        where board = getBoard game_map
+              height = getHeight game_map
+              width = getWidth game_map
+              cond_pos = getCondPos game_map
+              target_pos = getTargetPos game_map
+              playerPos = getPlayerPos game_map 
+
+
+
+
+convertStringForFunction :: [String] -> [Command]
+convertStringForFunction [] = []
+convertStringForFunction (x:xs) = [(fst $ head $ runParser moveParser x)] ++ convertStringForFunction xs
 
 isTargetReached :: GameMap -> Bool
 isTargetReached gamemap = (target_pos==player_pos)
@@ -258,11 +294,17 @@ isTargetReached gamemap = (target_pos==player_pos)
 playLoop :: GameMap -> IO ()
 playLoop gamemap = do direction_list <- play []
                       putStrLn (show direction_list)
-                      new_gamemap <- (moveFullyList gamemap direction_list)
+                      new_gamemap <- (moveFullyList gamemap direction_list True)
                       if isTargetReached new_gamemap 
-                          then do putStrLn "You reached the target!"
+                          then do putStrLn "Congratulations! You won the game!"
                                   return () 
                       else playLoop new_gamemap
+
+loopToBasicMoveConverter :: Command -> [Command]
+loopToBasicMoveConverter loop = concat $ replicate count [new_move1,new_move2] 
+    where (Loop count move1 move2) = loop
+          new_move1 = M move1 
+          new_move2 = M move2 
 
 directions :: [String]
 directions = ["Left","Right","Up","Down"]
@@ -277,7 +319,8 @@ refreshGameMap :: GameMap -> GameMap
 refreshGameMap game_map = GameMap { getBoard=refreshed_board,
                                     getHeight = height, 
                                     getWidth = width,
-                                    getCondPos=cond_pos,
+                                    getCondPos= cond_pos,
+                                    getFunction = function_def ,
                                     getPlayerPos=player_pos,
                                     getTargetPos=target_pos,
                                     playerWon=has_won } 
@@ -288,6 +331,7 @@ refreshGameMap game_map = GameMap { getBoard=refreshed_board,
           width = getWidth game_map 
           player_pos = getPlayerPos game_map 
           has_won = playerWon game_map 
+          function_def = getFunction game_map 
           target_pos = getTargetPos game_map
 
 getPlayDirection :: [Command] -> IO [Command]
@@ -325,6 +369,7 @@ loadFile filepath = do
                            getHeight=boardHeight, 
                            getWidth=boardWidth, 
                            getCondPos = cond_pos, 
+                           getFunction = [],
                            getTargetPos = target_pos,
                            getPlayerPos = playerPos,
                            playerWon = False}
@@ -410,6 +455,7 @@ updateBoard game_map board new_i new_j = GameMap {getBoard = board,
                                                   getHeight= height,
                                                   getWidth = width,   
                                                   getCondPos = cond_pos,
+                                                  getFunction = function_def,
                                                   getTargetPos = target_pos,         
                                                   getPlayerPos = (new_i,new_j),
                                                   playerWon = False
@@ -417,6 +463,7 @@ updateBoard game_map board new_i new_j = GameMap {getBoard = board,
     where height = getHeight game_map
           width = getWidth game_map
           cond_pos = getCondPos game_map
+          function_def = getFunction game_map
           target_pos = getTargetPos game_map
 
 
@@ -428,49 +475,59 @@ commandIsCond :: Command -> Bool
 commandIsCond cmd = case cmd of (M (Cond item dir)) -> True 
                                 _ -> False
 
-moveFullyList :: GameMap -> [Command] -> IO GameMap
-moveFullyList game_map [] = return game_map     
-moveFullyList game_map [(M (Cond _ _))] = return game_map       
-moveFullyList game_map [cmd] = 
+moveFullyList :: GameMap -> [Command] -> Bool -> IO GameMap
+moveFullyList game_map [] isStartingMove = return game_map     
+moveFullyList game_map [(M (Cond _ _))] isStartingMove = return game_map       
+moveFullyList game_map [cmd] isStartingMove = 
     let (M (D dir)) = cmd
         moveDir = moveOneStep game_map dir 
         ref_moveDir = refreshGameMap moveDir
         dirTested = testDirection game_map dir
         dirBonus = testBonus game_map dir
+        not_starting_move = False
     in if dirTested && dirBonus 
         then do putStrLn "You got a bonus"
-                new_gamemap <- (moveFullyList ref_moveDir [cmd])
+                new_gamemap <- (moveFullyList ref_moveDir [cmd] not_starting_move) 
                 return new_gamemap
         else if dirTested
-                then do new_gamemap <- (moveFullyList ref_moveDir [cmd])
+                then do new_gamemap <- (moveFullyList ref_moveDir [cmd] not_starting_move) 
                         return new_gamemap
+        else if isStartingMove
+                then do putStrLn ("Sorry cannot move " ++ dir)
+                        return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
                 return game_map
 
-moveFullyList game_map (cmd1:cmd2:cmds) 
+moveFullyList game_map (cmd1:cmd2:cmds) isStartingMove
     | (commandIsDirection cmd1) && (commandIsDirection cmd2) =
         (if dir1Tested && dir1Bonus 
             then do putStrLn ("You got a bonus!")
-                    new_game <- moveFullyList ref_moveDir1 full_commands
+                    new_game <- moveFullyList ref_moveDir1 full_commands False 
                     return new_game
         else if dir1Tested 
-                then do new_game <- moveFullyList ref_moveDir1 full_commands
+                then do new_game <- moveFullyList ref_moveDir1 full_commands False 
                         return (refreshGameMap new_game)
+        else if isStartingMove
+                then do putStrLn ("Sorry cannot move " ++ dir1)
+                        return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
-                new_game <- moveFullyList moveDir2 new_commands
+                new_game <- moveFullyList moveDir2 new_commands True 
                 return new_game)
     | (commandIsDirection cmd1) && (commandIsCond cmd2) = 
         if dir1TestConditional && dir2TestConditionalSpecific
             then do putStrLn (boardToStr $ getBoard game_map)
-                    new_game <- moveFullyList moveDir1 cond_commands
+                    new_game <- moveFullyList moveDir1 cond_commands True
                     return new_game
         else if dir1Tested && dir1Bonus 
                 then do putStrLn ("You got a bonus!")
-                        new_game <- moveFullyList ref_moveDir1 full_commands
+                        new_game <- moveFullyList ref_moveDir1 full_commands False
                         return new_game 
         else if dir1Tested 
-                then do new_game <- moveFullyList ref_moveDir1 full_commands
+                then do new_game <- moveFullyList ref_moveDir1 full_commands False
                         return new_game
+        else if isStartingMove
+                then do putStrLn ("Sorry cannot move "++dir1)
+                        return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
                 return game_map
     where (M (D dir1)) = cmd1
@@ -494,37 +551,6 @@ moveFullyList game_map (cmd1:cmd2:cmds)
 
                                              
 
-
--- moveFully :: GameMap -> Command -> GameMap
--- moveFully game_map cmd 
---     | testDirectionConditional game_map direction = moveOneStep game_map direction
---     | testDirection game_map direction =  moveFully (moveOneStep game_map direction) cmd 
---     | otherwise = game_map
---     where (M (D direction)) = cmd
-
-
--- TODO will delete
-test = do xs <- loadFile "test.txt"
-          directions <- play []
-          res <- moveFullyList xs directions 
-          putStrLn (show $ getPlayerPos res)
-          putStrLn (boardToStr $ getBoard (refreshGameMap res))
-          putStrLn (show $ getCondPos res)
-
-
-
--- -- if game across a condition then we do one more 
--- -- else if game come across bonus then we add the bonus to the gameMap (increment bonus point) 
--- -- else if game come across path then recursion 
--- -- else just return the game
--- -- dont stop when meeting conditional unless the direction is conditional. 
--- moveFully :: GameMap -> Direction -> GameMap
--- moveFully game_map direction =
---     if testDirectionConditional game_map direction
---         then moveOneStep game_map direction
---     else if testDirection game_map direction
---         then moveFully (moveOneStep game_map direction) direction
---     else game_map
 
 moveOneStep :: GameMap -> Direction -> GameMap  
 moveOneStep game_map direction 
@@ -596,42 +622,6 @@ move board (i,j) direction bonusCount
 
 
 
-test2 :: IO () 
-test2 = do putStr (boardToStr sample_board)
-           let (i,j) = findPlayerPos sample_board 
-               (i_new,j_new,che,bonus) = move sample_board (i,j) "Right" 0
-               (q,w,e,r) = move sample_board (i_new,j_new) "Up" bonus
-           putStrLn (show (q,w,e,r))
-           return ()  
-
--- move :: Board -> Int -> Int -> Direction -> Board
--- move board i j direction = 
---     | direction == "Left" = moveLeft
---     | direction == "Right" = moveRight
---     | direction == "Up" = moveUp 
---     | direction == "Down" = moveDown 
-
--- isValidMove :: Board -> Int -> Int -> Direction -> Bool
--- isValidMove board i j direction = 
---     | direction == "Left" = validPosition (i,j-1) board
---     | direction == "Right" = validPosition (i,j+1) board
---     | direction == "Up" = validPosition (i-1,j) board 
---     | direction == "Down" = validPosition (i+1,j) board
-
-
--- moveStepWise :: Board -> Int -> Int -> Direction -> Board 
--- moveStepWise board i j direction
---     | direction == "Left" && not (isGrassPosOrOutOfRange (i,j-1,'n') board) = moveLeft board i j 
---     | direction == "Right" && not (isGrassPosOrOutOfRange (i,j+1,'n') board) = moveRight board i j 
---     | direction == "Up" && not (isGrassPosOrOutOfRange (i-1,j,'n') board) = moveUp board i j 
---     | direction == "Down" && not (isGrassPosOrOutOfRange (i+1,j,'n') board) = moveDown board i j
-
--- moveThrough :: Board -> Int -> Int -> Direction -> Board
--- moveThrough board i j direction
---     if isValidMove i j direction
---         then moveThrough move board i j direction
-    
-
 editRow :: Int -> a -> [a] -> [a]
 editRow _ _ [] = []
 editRow pos elem xs = if pos >= 0 && pos < length xs
@@ -645,71 +635,7 @@ edit2DArray row_idx col_idx elem matrix =
                new_row = editRow col_idx elem old_row
            in editRow row_idx new_row matrix 
     else []
-                      
-sample_board :: Board
-sample_board = ["*****-------------------*****",
-                "*****b-----------------b*****",
-                "*****-*****************-*****",
-                "*****-**----*****----**-*****",
-                "*****-**-yy-*****-yy-**-*****",
-                "*****-**----*****----**-*****",
-                "*****-******--b--******-*****",
-                "*****-******-***-******-*****",
-                "@-----******-***-******p----t",
-                "*****-******-***-******-*****",
-                "*****--------***--------*****",
-                "*****************************",
-                "*****************************"]
-
-sample_board2 :: Board
-sample_board2= ["*****-------------------*****",
-                "*****b-----------------b*****",
-                "*****-*****************-*****",
-                "*****-**----*****----**-*****",
-                "*****-**-yy-*****-yy-**-*****",
-                "*****-**----*****----**-*****",
-                "*****-******--*--******p----*",
-                "*****-******-***-******-***-*",
-                "@-----******-***-******-----t",
-                "*****-******-***-******-*****",
-                "*****-------****---b----*****",
-                "*****************************",
-                "*****************************"]
-
-
-sample_board3 :: Board
-sample_board3= ["*****-------------------*****",
-                "*****b-----------------b*****",
-                "*****-*****************-*****",
-                "*****-**----*****----**-*****",
-                "*****-**-yy-*****-yy-**-*****",
-                "*****-**----*****----**-*****",
-                "*****-******--*b-******p----*",
-                "*****-******-***-******-***-*",
-                "@-----******-***-******-----t",
-                "*****-******-***-******-*****",
-                "*****--------***--------*****",
-                "*****************************",
-                "*****************************"]
-
-map2_2 = ["*****-------------------*****",
-          "*****------------------b*****",
-          "*****-*****************-*****",
-          "*****-**----*****----**-*****",
-          "*****-**----*****----**-*****",
-          "*****-**----*****----**-*****",
-          "*****-******--b-*******-*****",
-          "*****-******-***-******-*****",
-          "@----p******-***-******p----t",
-          "*****-******-***-******-*****",
-          "*****---b----***--------*****",
-          "*****************************",
-          "*****************************"]
-
-
-
-
-
+ 
 
 {-- Section: Check board solvability --}
 traversablePosition :: (Int,Int,Char) -> [(Int,Int)] -> Board -> Bool
@@ -870,16 +796,6 @@ testSearchAllPath board =
         result = map dirStrToCommands (map squashDirections paths_string)
     in  result
 
-
-
-path_construct = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'R','-'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
-path_construct2 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','-'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
-path_construct3 = [(8,0,'A','@'),(8,1,'R','-'),(8,2,'R','-'),(8,3,'R','-'),(8,4,'R','-'),(8,5,'R','-'),(9,5,'D','-'),(10,5,'D','-'),(10,6,'R','-'),(10,7,'R','-'),(10,8,'R','-'),(10,9,'R','-'),(10,10,'R','-'),(10,11,'R','-'),(10,12,'R','-'),(9,12,'U','-'),(8,12,'U','-'),(7,12,'U','-'),(6,12,'U','-'),(6,13,'R','-'),(6,14,'R','b'),(6,15,'R','-'),(6,16,'R','-'),(7,16,'D','-'),(8,16,'D','-'),(9,16,'D','-'),(10,16,'D','-'),(10,17,'R','-'),(10,18,'R','-'),(10,19,'R','-'),(10,20,'R','-'),(10,21,'R','-'),(10,22,'R','-'),(10,23,'R','-'),(9,23,'U','-'),(8,23,'U','p'),(8,24,'U','p'),(8,25,'R','-'),(8,26,'R','-'),(8,27,'R','-'),(8,28,'R','t')]
-
-path_construct4 = [(2,2,'R','-'), (2,2,'R','p'),  (2,2,'D','-')  , (2,2,'D','y') , (2,2,'D','y')    ]
-
-
-
 squashDirections :: [(Char,Char)] -> [Char]
 squashDirections [] = []
 squashDirections [(d,i)] = [d]
@@ -908,9 +824,6 @@ dirStrToCommands [x] = charToCommandMapping x
 dirStrToCommands (x:y:str) 
     | x `elem` conditionals = charToCommandMapping x ++ charToCommandMapping y ++ "}" ++ " " ++ dirStrToCommands str 
     | otherwise = charToCommandMapping x ++ " " ++ dirStrToCommands (y:str)
-
-
-
 
 reformatPath :: [(Int,Int,Char,Char)] -> [String]
 reformatPath paths =  words (dirStrToCommands (squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]))
