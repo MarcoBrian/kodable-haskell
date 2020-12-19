@@ -13,7 +13,7 @@ type Direction = String
 type Point = (Int,Int,Char)
 
 data Move = Cond Item Direction | D Direction deriving (Eq)
-data Command = Function | Loop Int Move Move | M Move deriving (Eq)
+data Command = Function | Loop Int Move Move | M Move | Help deriving (Eq)
 
 instance Show Move where
     show (D direction) = direction
@@ -23,6 +23,7 @@ instance Show Command where
     show (Loop i m1 m2) = "Loop{" ++ show i ++ "}{" ++ show m1 ++ "," ++ show m2 ++ "}"
     show (Function) = "Function" 
     show (M m) = show m
+    show (Help) = "Help"
 
 data GameMap = GameMap 
                { getBoard :: Board ,
@@ -166,12 +167,16 @@ directionMoveParser :: Parser Move
 directionMoveParser = do dir <-directionParser
                          return (D dir) 
 
+
 numberParser :: Parser Char 
 numberParser = char '1' +++ char '2' +++ char '3' +++ char '4' +++ char '5' 
 
+helpParser :: Parser Command
+helpParser = do s <- (string "Help" +++ string "help")
+                return (Help)
 
 commandParser :: Parser Command 
-commandParser = functionParser +++ loopParser +++ moveParser
+commandParser = functionParser +++ loopParser +++ moveParser +++ helpParser
 
 moveParser :: Parser Command
 moveParser = do move <- (conditionalParser +++ directionMoveParser)
@@ -275,9 +280,9 @@ loadFile filepath = do
              hClose handle  
              return emptyGameMap)
 
-start_kodable :: IO () 
-start_kodable = do informationIO 
-                   kodable emptyGameMap
+main :: IO () 
+main = do informationIO 
+          kodable emptyGameMap
 
 kodable :: GameMap -> IO ()
 kodable gamemap = do 
@@ -299,8 +304,8 @@ kodable gamemap = do
                     kodable gamemap
     else if head command_list == "play"
             then if isBoardSolvable (getBoard gamemap)
-                    then if (length command_list == 4) -- if command is 4 there is function definition
-                            then do let functions = (convertStringForFunction $ tail command_list)
+                    then if (length command_list == 4) 
+                            then do let functions = (convertStringsToCommands $ tail command_list)
                                         in if length functions == 3 
                                                 then playLoop (initFunctionInGameMap gamemap functions)
                                            else playLoop gamemap
@@ -329,9 +334,9 @@ initFunctionInGameMap game_map function_def = GameMap {getBoard = board,
 
 
 
-convertStringForFunction :: [String] -> [Command]
-convertStringForFunction [] = []
-convertStringForFunction (x:xs) = [(fst $ head $ runParser moveParser x)] ++ convertStringForFunction xs
+convertStringsToCommands :: [String] -> [Command]
+convertStringsToCommands [] = []
+convertStringsToCommands (x:xs) = [(fst $ head $ runParser moveParser x)] ++ convertStringsToCommands xs
 
 isTargetReached :: GameMap -> Bool
 isTargetReached gamemap = (target_pos==player_pos)
@@ -339,13 +344,18 @@ isTargetReached gamemap = (target_pos==player_pos)
           player_pos = getPlayerPos gamemap 
 
 playLoop :: GameMap -> IO ()
-playLoop gamemap = do direction_list <- play []
-                      putStrLn (show direction_list)
-                      new_gamemap <- (moveFullyList gamemap direction_list True)
-                      if isTargetReached new_gamemap 
-                          then do putStrLn "Congratulations! You won the game!"
-                                  return () 
-                      else playLoop new_gamemap
+playLoop gamemap = do direction_list_raw <- play []
+                      let function_def = getFunction gamemap 
+                          direction_list = convertCommandToBasicMove direction_list_raw function_def                       
+                      if Help `elem` direction_list
+                          then do let optimal = take 3 (optimalPath (getBoard gamemap))
+                                  putStrLn ("Try these: " ++ (show optimal) )
+                                  playLoop gamemap 
+                      else do new_gamemap <- (moveFullyList gamemap direction_list True)
+                              if isTargetReached new_gamemap 
+                                then do putStrLn "Congratulations! You won the game!"
+                                        return () 
+                              else playLoop new_gamemap
 
 -- invalid input will cause the play IO to return 
 play :: [Command] -> IO [Command]
@@ -355,17 +365,25 @@ play xs = do if null xs
              else do putStr "Next    Direction : "
                      getPlayDirection xs
 
-
 getPlayDirection :: [Command] -> IO [Command]
 getPlayDirection xs = do command <- getLine
                          let stripped_command = stripWhiteSpaces command -- take away trailing whitespaces
                              parsed_command = runParser commandParser stripped_command
                              parsed_command_type = fst $ head parsed_command
-                         if (not $ null command) && (not $ null $ parsed_command) 
-                            then do play (xs ++ [parsed_command_type])
+                         if ((not $ null command) && (not $ null $ parsed_command)) 
+                            then do if (parsed_command_type `elem` [Help]) == True
+                                        then return [Help]
+                                    else play (xs ++ [parsed_command_type])
                          else do return xs
 
 
+
+convertCommandToBasicMove :: [Command] -> [Command] -> [Command]
+convertCommandToBasicMove [] function_def = []
+convertCommandToBasicMove (cmd:cmds) function_def = 
+    case cmd of (Loop int move1 move2) -> (loopToBasicMoveConverter cmd) ++ convertCommandToBasicMove cmds function_def
+                (Function) -> function_def ++ convertCommandToBasicMove cmds function_def
+                _ -> [cmd] ++ convertCommandToBasicMove cmds function_def
 
 loopToBasicMoveConverter :: Command -> [Command]
 loopToBasicMoveConverter loop = concat $ replicate count [new_move1,new_move2] 
@@ -374,23 +392,27 @@ loopToBasicMoveConverter loop = concat $ replicate count [new_move1,new_move2]
           new_move2 = M move2 
 
 
+getGameFunction :: GameMap -> [Command]
+getGameFunction gamemap = getFunction gamemap 
+
 
 
 refreshGameMap :: GameMap -> GameMap 
-refreshGameMap game_map = GameMap { getBoard=refreshed_board,
+refreshGameMap game_map = GameMap { getBoard=refreshed_board2,
                                     getHeight = height, 
                                     getWidth = width,
                                     getCondPos= cond_pos,
                                     getFunction = function_def ,
-                                    getPlayerPos=player_pos,
+                                    getPlayerPos=(i,j),
                                     getTargetPos=target_pos,
                                     playerWon=has_won } 
     where board  = getBoard game_map 
           cond_pos = getCondPos game_map
           refreshed_board = refreshBoard board cond_pos 
+          refreshed_board2 = edit2DArray i j ball refreshed_board
           height = getHeight game_map 
           width = getWidth game_map 
-          player_pos = getPlayerPos game_map 
+          (i,j) = getPlayerPos game_map 
           has_won = playerWon game_map 
           function_def = getFunction game_map 
           target_pos = getTargetPos game_map
@@ -400,14 +422,6 @@ refreshBoard board [] = board
 refreshBoard board (p:ps) = refreshBoard new_board ps
     where (i,j,color) = p
           new_board = edit2DArray i j color board
-
-
-
-
-
-
-
-
 
 -- check if next item is a bonus 
 testBonus :: GameMap -> Direction -> Bool  
@@ -794,3 +808,123 @@ dirStrToCommands (x:y:str)
 
 reformatPath :: [(Int,Int,Char,Char)] -> [String]
 reformatPath paths =  words (dirStrToCommands (squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]))
+
+{--Section convert paths to contain loops and functions --}
+generateTwoMoveCombinations :: [String] -> [[String]]
+generateTwoMoveCombinations [] = [] 
+generateTwoMoveCombinations [x] = [] 
+generateTwoMoveCombinations (x:y:xs) = [[x]++[y]] ++ generateTwoMoveCombinations (y:xs)  
+
+generateUniqueTwoMoveComb :: [String] -> [[String]]
+generateUniqueTwoMoveComb commands = nub (generateTwoMoveCombinations commands)
+
+transformLoopAux :: [[String]] -> [String] -> [String]
+transformLoopAux [] commands = commands 
+transformLoopAux (comb:combs) commands = transformLoopAux combs looped
+    where looped = basicCommandToLoopConverter commands comb 0 
+
+transformLoop :: [String] -> [String]
+transformLoop commands = transformLoopAux uniqueTwoCombs commands
+    where uniqueTwoCombs = generateUniqueTwoMoveComb commands 
+
+basicCommandToLoopConverter :: [String] -> [String] -> Int -> [String]
+basicCommandToLoopConverter [] baseMoves loopCounter = 
+    let move1 = baseMoves !! 0 
+        move2 = baseMoves !! 1
+        loopString = "Loop{" ++ (show loopCounter) ++ "}{" ++ move1 ++ ","  ++ move2 ++  "}"
+    in if loopCounter > 1 
+          then [loopString]
+       else if loopCounter == 1
+               then baseMoves 
+       else []
+basicCommandToLoopConverter [x1] baseMoves loopCounter = 
+    let  move1 = baseMoves !! 0 
+         move2 = baseMoves !! 1
+         loopString = "Loop{" ++ (show loopCounter) ++ "}{" ++ move1 ++ ","  ++ move2 ++  "}"
+    in if loopCounter == 0 
+          then [x1] 
+       else if loopCounter == 1 
+          then baseMoves ++ [x1]
+       else [loopString] ++ [x1] 
+basicCommandToLoopConverter (x1:x2:cmds) baseMoves loopCounter 
+    | (x1 == move1 && x2 == move2) = basicCommandToLoopConverter cmds baseMoves (loopCounter + 1)
+    | otherwise = if loopCounter > 1 
+                     then [loopString] ++ (basicCommandToLoopConverter (x1:x2:cmds) baseMoves 0)
+                  else if loopCounter == 1
+                          then baseMoves ++ (basicCommandToLoopConverter (x1:x2:cmds) baseMoves 0)
+                  else [x1] ++ (basicCommandToLoopConverter (x2:cmds) baseMoves 0)
+    where move1 = baseMoves !! 0 
+          move2 = baseMoves !! 1
+          loopString = "Loop{" ++ (show loopCounter) ++ "}{" ++ move1 ++ ","  ++ move2 ++  "}"
+
+generateAllFunctions :: [[String]]
+generateAllFunctions = [ [d,d2,d3] | d <- directions , d2 <- directions , d3 <- directions, d /= d2 && d3 /= d2 ] ++ [[]]
+
+transformFunctionAux :: [String] -> [String] -> [String]
+transformFunctionAux [] function_def = [] 
+transformFunctionAux commands function_def 
+    | isFunction = ["Function"] ++ (transformFunctionAux rest_of_commands function_def )
+    | otherwise = [head_command] ++ (transformFunctionAux tail_command function_def)
+    where isFunction = (take 3 commands) == function_def
+          rest_of_commands = (drop 3 commands)
+          head_command =  head commands
+          tail_command = tail commands
+          
+transformFunction :: [String] -> [String] -> ([String],[String])
+transformFunction commands function_def = (transformed,function_def)
+    where transformed = transformFunctionAux commands function_def 
+
+generateAllTransformFunction :: [String] -> [([String],[String])]
+generateAllTransformFunction commands = map (\function_def -> transformFunction commands function_def ) all_functions
+    where all_functions = generateAllFunctions
+
+
+sortByLength :: (Foldable t1, Foldable t2, Foldable t3, Foldable t4) => (t1 a1, t3 a2) -> (t2 a3, t4 a4) -> Ordering
+sortByLength (a1, b1) (a2, b2)
+  | length a1 < length a2 = LT
+  | length a1 > length a2 = GT
+  | length a1 == length a2 = compare (length b1) (length b2)
+
+transformLoopThenFunction :: [String] -> ([String],[String]) 
+transformLoopThenFunction commands = head_command 
+   where loop_transformed = transformLoop commands
+         function_transformed_all = generateAllTransformFunction loop_transformed
+         sorted = sortBy sortByLength function_transformed_all
+         head_command = head sorted
+
+transformFunctionThenLoop :: [String] -> ([String],[String])
+transformFunctionThenLoop commands = (final,function_def)
+    where unique_two_combs = generateUniqueTwoMoveComb commands
+          function_transformed_all = generateAllTransformFunction commands
+          sorted = sortBy sortByLength function_transformed_all
+          head_sorted = head sorted 
+          head_sorted_list = fst head_sorted
+          function_def = snd head_sorted 
+          final = transformLoopAux unique_two_combs head_sorted_list
+
+optimizedFunctionLoops :: [String] -> ([String],[String])
+optimizedFunctionLoops commands = head_sorted
+    where function_first = transformFunctionThenLoop commands
+          loop_first = transformLoopThenFunction commands
+          head_sorted = head $ sortBy sortByLength $ [function_first] ++ [loop_first]
+
+t :: [String]
+t = ["Cond{p}{Right}","Up","Cond{p}{Right}","Up","Right","Up","Right","Up","Right"]
+
+s :: [String]
+s = ["Right","Up","Right"]
+
+sample_board :: Board
+sample_board = ["*****-------------------*****",
+                "*****b-----------------b*****",
+                "*****-*****************-*****",
+                "*****-**----*****----**-*****",
+                "*****-**-yy-*****-yy-**-*****",
+                "*****-**----*****----**-*****",
+                "*****-******--b--******-*****",
+                "*****-******-***-******-*****",
+                "@-----******-***-******p----t",
+                "*****-******-***-******-*****",
+                "*****--------***--------*****",
+                "*****************************",
+                "*****************************"]
