@@ -5,7 +5,6 @@ import Data.Char
 import Data.List
 import Control.Exception
 
-
 {-- Section: Data types --}
 type Item = Char
 type Board = [[Item]]
@@ -35,9 +34,6 @@ data GameMap = GameMap
                  getTargetPos :: (Int,Int),
                  playerWon :: Bool
                 }  
-
-
-
 
 {-- ‘@’ represents the ball.
     ‘-’ represents a path block that the ball could roll on.
@@ -79,8 +75,6 @@ emptyGameMap = GameMap {getBoard=[],
                         getPlayerPos=(0,0),
                         getTargetPos=(0,0),
                         playerWon=False}
-
-
 
 {-- Section : Helper utility functions --}
 
@@ -155,6 +149,14 @@ itemIsConditional item = item `elem` conditionals
 itemIsGrass :: Item -> Bool 
 itemIsGrass item = item == grass 
 
+commandIsDirection :: Command -> Bool 
+commandIsDirection cmd = case cmd of (M (D direction)) -> True 
+                                     _ -> False 
+
+commandIsCond :: Command -> Bool 
+commandIsCond cmd = case cmd of (M (Cond item dir)) -> True 
+                                _ -> False
+
 
 {-- Section: Command Parsers--}
 colorParser :: Parser Char
@@ -226,8 +228,17 @@ informationIO = do putStrLn "-- Kodable Game Commands ------------------"
 solveIO :: GameMap -> IO () 
 solveIO gamemap = if isBoardSolvable (getBoard gamemap)
                         then do putStrLn "A solution to this game:" 
-                                putStrLn (intercalate " " $ optimalPath (getBoard gamemap))
-                                kodable gamemap
+                                let optimal_path = optimalPath (getBoard gamemap)
+                                    with_FunctionLoops = optimizedFunctionLoops optimal_path
+                                    solution_path = fst with_FunctionLoops
+                                    function_def = snd with_FunctionLoops
+                                    str_path = intercalate " " solution_path
+                                    str_func = intercalate " " function_def 
+                                if not $ null function_def 
+                                    then do putStrLn (str_path ++ " with " ++ str_func)
+                                            kodable gamemap 
+                                else do putStrLn str_path
+                                        kodable gamemap 
                   else do putStrLn "This board cannot be solved, quitting game.."
                           return ()
 
@@ -490,13 +501,6 @@ updateBoard game_map board new_i new_j = GameMap {getBoard = board,
           target_pos = getTargetPos game_map
 
 
-commandIsDirection :: Command -> Bool 
-commandIsDirection cmd = case cmd of (M (D direction)) -> True 
-                                     _ -> False 
-
-commandIsCond :: Command -> Bool 
-commandIsCond cmd = case cmd of (M (Cond item dir)) -> True 
-                                _ -> False
 
 
 {-- Section interactive movement logic --}
@@ -809,7 +813,8 @@ dirStrToCommands (x:y:str)
 reformatPath :: [(Int,Int,Char,Char)] -> [String]
 reformatPath paths =  words (dirStrToCommands (squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]))
 
-{--Section convert paths to contain loops and functions --}
+{--Section to convert paths to contain loops and functions --}
+
 generateTwoMoveCombinations :: [String] -> [[String]]
 generateTwoMoveCombinations [] = [] 
 generateTwoMoveCombinations [x] = [] 
