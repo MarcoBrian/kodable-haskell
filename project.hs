@@ -1,3 +1,12 @@
+{- |
+
+Module      :  project.hs
+Description :  Kodable Clone in CLI
+Author   :  Marco Brian Widjaja
+This is a kodable clone done in haskell
+
+-}
+
 import System.IO
 import System.Directory 
 import Prelude
@@ -550,8 +559,6 @@ updateBoard game_map board new_i new_j = GameMap {getBoard = board,
           cond_pos = getCondPos game_map
           function_def = getFunction game_map
           target_pos = getTargetPos game_map
-
-
 
 
 {-- Section interactive movement logic --}
