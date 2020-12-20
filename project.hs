@@ -12,7 +12,7 @@ type Direction = String
 type Point = (Int,Int,Char)
 
 data Move = Cond Item Direction | D Direction deriving (Eq)
-data Command = Function | Loop Int Move Move | M Move | Help deriving (Eq)
+data Command = Function | Loop Int Move Move | M Move | Help | Menu deriving (Eq)
 
 instance Show Move where
     show (D direction) = direction
@@ -177,8 +177,12 @@ helpParser :: Parser Command
 helpParser = do s <- (string "Help" +++ string "help")
                 return (Help)
 
+menuParser :: Parser Command
+menuParser = do s <- (string "menu" +++ string "Menu")
+                return (Menu)
+
 commandParser :: Parser Command 
-commandParser = functionParser +++ loopParser +++ moveParser +++ helpParser
+commandParser = functionParser +++ loopParser +++ moveParser +++ helpParser +++ menuParser
 
 moveParser :: Parser Command
 moveParser = do move <- (conditionalParser +++ directionMoveParser)
@@ -221,9 +225,22 @@ informationIO = do putStrLn "-- Kodable Game Commands ------------------"
                    putStrLn "- solve - give a solution for the map    --"
                    putStrLn "- quit - quit the game                   --"
                    putStrLn "- play - interactive action from player  --"
+                   putStrLn "-    when using this command there is the -"
+                   putStrLn "-    option to define a function and to   -"
+                   putStrLn "-    get hints/help                       -"
+                   putStrLn "- save - save progress of the game        -"
                    putStrLn "-                                         -"
-                   putStrLn "~ Please load a valid map before starting ~"
+                   putStrLn "- Load a map and play now!                -"
                    putStrLn "-------------------------------------------"
+
+saveIO :: GameMap -> IO ()
+saveIO gamemap = do putStrLn "New file name to save progress (.txt file) "
+                    fileName <- getLine
+                    let board_str = unlines $ getBoard gamemap 
+                    putStrLn "Saving file ..."
+                    writeFile fileName board_str
+                    putStrLn  ("Game saved to " ++ fileName)
+                    kodable gamemap 
 
 solveIO :: GameMap -> IO () 
 solveIO gamemap = if isBoardSolvable (getBoard gamemap)
@@ -292,12 +309,17 @@ loadFile filepath = do
              return emptyGameMap)
 
 main :: IO () 
-main = do informationIO 
+main = do informationIO
           kodable emptyGameMap
+
+backToMain :: GameMap -> IO ()
+backToMain gamemap = do informationIO
+                        kodable gamemap
 
 kodable :: GameMap -> IO ()
 kodable gamemap = do 
-    putStr ">"
+    putStrLn " "
+    putStrLn "Command:"
     command <- getLine
     let command_list = words command
     if null command_list -- empty input restart cursor 
@@ -308,6 +330,8 @@ kodable gamemap = do
         then checkIO gamemap
     else if (head command_list == "solve")
         then solveIO gamemap
+    else if (head command_list == "save")
+        then saveIO gamemap
     else if (head command_list == "load")
             then if (length command_list == 2)
                     then do loadIO command_list
@@ -362,6 +386,8 @@ playLoop gamemap = do direction_list_raw <- play []
                           then do let optimal = take 3 (optimalPath (getBoard gamemap))
                                   putStrLn ("Try these: " ++ (show optimal) )
                                   playLoop gamemap 
+                      else if Menu `elem` direction_list
+                                then backToMain gamemap
                       else do new_gamemap <- (moveFullyList gamemap direction_list True)
                               if isTargetReached new_gamemap 
                                 then do putStrLn "Congratulations! You won the game!"
@@ -371,9 +397,9 @@ playLoop gamemap = do direction_list_raw <- play []
 -- invalid input will cause the play IO to return 
 play :: [Command] -> IO [Command]
 play xs = do if null xs
-                then do putStr "First   Direction : "
+                then do putStrLn "First   Direction : "
                         getPlayDirection xs
-             else do putStr "Next    Direction : "
+             else do putStrLn "Next    Direction : "
                      getPlayDirection xs
 
 getPlayDirection :: [Command] -> IO [Command]
@@ -384,6 +410,8 @@ getPlayDirection xs = do command <- getLine
                          if ((not $ null command) && (not $ null $ parsed_command)) 
                             then do if (parsed_command_type `elem` [Help]) == True
                                         then return [Help]
+                                    else if (parsed_command_type `elem` [Menu]) == True
+                                            then return [Menu]
                                     else play (xs ++ [parsed_command_type])
                          else do return xs
 
@@ -523,6 +551,8 @@ moveFullyList game_map [cmd] isStartingMove =
                         return new_gamemap
         else if isStartingMove
                 then do putStrLn ("Sorry cannot move " ++ dir)
+                        putStrLn ("Current board: ")
+                        putStrLn (boardToStr $ getBoard game_map)
                         return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
                 return game_map
@@ -538,6 +568,8 @@ moveFullyList game_map (cmd1:cmd2:cmds) isStartingMove
                         return (refreshGameMap new_game)
         else if isStartingMove
                 then do putStrLn ("Sorry cannot move " ++ dir1)
+                        putStrLn ("Current board: ")
+                        putStrLn (boardToStr $ getBoard game_map)
                         return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
                 new_game <- moveFullyList moveDir2 new_commands True 
@@ -556,6 +588,8 @@ moveFullyList game_map (cmd1:cmd2:cmds) isStartingMove
                         return new_game
         else if isStartingMove
                 then do putStrLn ("Sorry cannot move "++dir1)
+                        putStrLn ("Current board: ")
+                        putStrLn (boardToStr $ getBoard game_map)
                         return game_map
         else do putStrLn (boardToStr $ getBoard game_map)
                 return game_map
