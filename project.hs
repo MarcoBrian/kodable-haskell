@@ -1,4 +1,5 @@
-import System.IO 
+import System.IO
+import System.Directory 
 import Prelude
 import Parser
 import Data.Char 
@@ -10,7 +11,7 @@ type Item = Char
 type Board = [[Item]]
 type Direction = String
 type Point = (Int,Int,Char)
-
+type Vector = (Int,Int,Char,Char)
 data Move = Cond Item Direction | D Direction deriving (Eq)
 data Command = Function | Loop Int Move Move | M Move | Help | Menu deriving (Eq)
 
@@ -276,8 +277,28 @@ loadIO :: [String] -> IO ()
 loadIO command_list = do game_map <- loadFile (command_list !! 1)
                          kodable game_map
 
+bfsIO :: GameMap -> IO ()
+bfsIO gamemap = let board = getBoard gamemap
+                    bfs_path = optimizedFunctionLoops (pathToEnd board)
+                    function_def = snd bfs_path
+                    str_path = intercalate " " $ fst bfs_path
+                    func_path = intercalate " " $ function_def 
+                in if isBoardSolvable (getBoard gamemap) 
+                        then do if not $ null function_def 
+                                    then do putStrLn (str_path ++ " with " ++ func_path)
+                                            kodable gamemap 
+                                else do putStrLn str_path
+                                        kodable gamemap 
+                  else do putStrLn "This board cannot be solved, quitting game.." 
+                          return ()
+
 loadFile :: FilePath -> IO GameMap
 loadFile filepath = do        
+    fileExist <- doesFileExist filepath 
+    if not fileExist 
+        then do putStrLn "The file does not exist. Please load another file. Game map is re-initialized."
+                return emptyGameMap 
+    else do 
     handle <- openFile filepath ReadMode  
     contents <- hGetContents handle
     let cleanboard = map stringToItems (map stripWhiteSpaces (lines contents))
@@ -347,6 +368,8 @@ kodable gamemap = do
                          else playLoop gamemap
                  else do putStrLn "~ ~ Please load a solvable map first ~ ~"
                          kodable gamemap
+    else if (head command_list == "bfs")
+            then do bfsIO gamemap
     else do kodable gamemap
 
 
@@ -714,7 +737,7 @@ bfsTraverse ((i, j, direction):xs) end visited board
          new_queue = xs ++ traversable_positions
 
 -- Used to construct a path of coordinates  
-bfsTraversePath :: [(Int,Int,Char,Char)] -> (Int,Int) -> [(Int,Int)] -> [((Int,Int,Char,Char),(Int,Int,Char,Char))]-> Board -> [(Int,Int,Char,Char)]
+bfsTraversePath :: [Vector] -> (Int,Int) -> [(Int,Int)] -> [(Vector,Vector)]-> Board -> [Vector]
 bfsTraversePath ((i, j, direction,item):xs) end visited history board  
     | ((i,j) /= end) = bfsTraversePath new_queue end updated_visited updated_history  board
     | otherwise = pathConstruction (i,j,direction,item) history []
@@ -725,7 +748,7 @@ bfsTraversePath ((i, j, direction,item):xs) end visited history board
          new_queue = xs ++ traversable_positions_item
          updated_history = history ++ [ ((a,b,dir,it2),(i,j,direction,item)) | (a,b,dir,it2) <- traversable_positions_item] 
 
-pathConstruction :: (Int,Int,Char,Char) -> [((Int,Int,Char,Char),(Int,Int,Char,Char))] -> [(Int,Int,Char,Char)] -> [(Int,Int,Char,Char)]
+pathConstruction :: Vector -> [(Vector,Vector)] -> [Vector] -> [Vector]
 pathConstruction (i,j,direction,item) history route
     | (length points) > 0 = (pathConstruction (head points) history updated_route )
     | otherwise = updated_route
@@ -741,18 +764,19 @@ isBoardSolvable board =
     in  bfsTraverse [start_pos_direction] end_pos [] board
 
 -- driver code -- 
-pathToEnd :: Board -> [(Int,Int,Char,Char)]
+pathToEnd :: Board -> [String]
 pathToEnd board = 
     let (i,j) = findPlayerPos board 
         bonusPositions = findBonusPos board
         end_pos = findTargetPos board 
         start_pos_direction = (i,j, 'A', getItemFromPosTuple board (i,j) )
-    in  reverse (bfsTraversePath [start_pos_direction] end_pos [] [] board)
+        path = reverse (bfsTraversePath [start_pos_direction] end_pos [] [] board)
+    in  reformatPath path 
 
 
 
 -- Search all possible paths to complete game
-searchAllPath :: Board -> (Int,Int,Char,Char) -> [(Int,Int,Char,Char)] -> [(Int,Int)] -> Bool -> [[(Int,Int,Char,Char)]] 
+searchAllPath :: Board -> Vector -> [Vector] -> [(Int,Int)] -> Bool -> [[Vector]] 
 searchAllPath board (i,j,dir,item) paths visited bonusFound 
     | ((i,j) `elem` visited) = if bonusFound then concat [ searchAllPath board next new_path updated_visited False | next <- tp_item ] else [] 
     | (item == target) =  [new_path]
@@ -768,7 +792,7 @@ searchAllPath board (i,j,dir,item) paths visited bonusFound
 
 
 -- Find paths with n bonuses --
-withBonus :: [(Int,Int)] -> Int -> [[(Int,Int,Char,Char)]] ->  [[(Int,Int,Char,Char)]]
+withBonus :: [(Int,Int)] -> Int -> [[Vector]] ->  [[Vector]]
 withBonus bonuses n [] = [] 
 withBonus bonuses n (p:paths) = 
     let path_coord = [ (i,j) | (i,j,_,_) <- p]
@@ -777,7 +801,7 @@ withBonus bonuses n (p:paths) =
     in if has_N_Bonus then [p] ++ rest_path else [] ++ rest_path
 
 -- driver test code -- 
-pathWithThreeBonus :: Board -> [[(Int,Int,Char,Char)]]
+pathWithThreeBonus :: Board -> [[Vector]]
 pathWithThreeBonus board = 
     let bonuses = findBonusPos board 
         (i,j) = findPlayerPos board
@@ -844,7 +868,7 @@ dirStrToCommands (x:y:str)
     | x `elem` conditionals = charToCommandMapping x ++ charToCommandMapping y ++ "}" ++ " " ++ dirStrToCommands str 
     | otherwise = charToCommandMapping x ++ " " ++ dirStrToCommands (y:str)
 
-reformatPath :: [(Int,Int,Char,Char)] -> [String]
+reformatPath :: [Vector] -> [String]
 reformatPath paths =  words (dirStrToCommands (squashDirections $ [ (dir,item) | (_,_,dir,item) <- paths ]))
 
 {--Section to convert paths to contain loops and functions --}
